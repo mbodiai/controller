@@ -1,0 +1,208 @@
+pyproject.toml
+README.txt
+src
+    types.py
+    geometry.py
+    projection.py
+    controller.py
+    __init__.py
+tests
+    __init__.py
+    test_types.py
+    test_geometry.py
+    test_projection.py
+    test_controller.py
+    
+
+
+src/types.py
+    import numpy as np
+    from numpy.typings import NDArray
+
+    @dataclass
+    class Pose(object):
+        position: NDArray[np.float64]
+        rotation: NDArray[np.float64]
+        init(position = position, rotation = rotation)
+
+    class Twist(object):
+        linearVelocity: NDArray[np.float64]
+        angularVelocity: NDArray[np.float64]
+        init(linearVelocity = linearVelocity, angularVelocity = angularVelocity)
+
+    class ControllerConfig(object):
+        KpPosition = 0.5
+        KpRotation = 0.5
+        n_Steps = 30
+        latency_seconds = 0.1
+
+src/geometry.py
+    #this is where we'll define our integrations. and the math for matrices/log mapping, etc.
+
+    import numpy as np
+    from numpy.typings import NDArray
+
+    from scipy.spatial.transform import Rotation
+
+
+    from types import Pose, Twist
+
+
+
+    def integratePosition(currentPosition: NDArray[np.float64], linearVelocity: NDArray[np.float64] , dt: np.float64) -> NDArray[np.float64]  :
+        return currentPosition + linearVelocity * dt
+
+    def integrateRotation(currentRotation: NDArray[np.float64], angularVelocity: NDArray[np.float64]  , dt: np.float64) -> NDArray[np.float64] :
+        omegaDt = angularVelocity * dt
+
+
+    def rotationStuff() -> np.NDArray[np.float64]:
+
+
+
+
+
+
+src/projection.py
+    #this is where we're going to predict where the object ends up, over some time frame
+
+    import numpy as np
+    from numpy.typing import NDArray
+
+    from geometry, import integratePosition, integrateRotation
+    from types, import Pose, Twist
+
+    def projectObjectState(objectPose: NDArray[np.float64], objectTwist: NDArray[np.float64], latency: np.float64, dt: np.float64) -> Tuple[Pose, Twist]:
+        
+        currentPosition = Pose.position.copy()
+        currentRotation = Pose.rotation.copy()
+
+        currentLinearVelocity = objectTwist.linearVelocity.copy()
+        currentAngularVelocity = objectTwist.angularVelocity.copy()
+
+        nSteps = int(np.ceil(latency/dt))
+
+        for step in nSteps:
+            currentPosition = integratePosition(currentPosition, currentLinearVelocity, dt)
+            currentRotation = integrateRotation(currentRotation, currentAngularVelocity, dt)
+
+
+        return (Pose(currentPosition, currentRotation), Twist)
+
+
+
+
+src/controller.py
+src/__init__.py
+
+
+tests/test_types.py
+tests/test_geometry.py
+tests/test_projection.py
+
+    import numpy as np
+    import pytest
+
+    from projection, import projectObjectState 
+    from types import Pose, Twist
+
+    class TestProjectObjectState:
+
+        def testZeroVelocity(self):
+            position = np.array([1,2,3], dtype = np.float64)
+            rotation = np.eye(3, dtype=np.float64)
+            
+            pose= Pose(position=position, rotation=rotation)
+
+            linearVelocity = np.array([0,0,0, dtype=np.float64)
+            angularVelocity = np.array([0,0,0, dtype=np.float64)
+
+            twist = Twist(linearVelocity = linearVelocity, angularVelocity = angularVelocity)
+
+            horizon = 0.3
+            dt = 0.1
+
+            projectedPose, ProjectTwist = projectObjectState(pose, twist, latency, dt)
+
+            assert np.allclose(projectedPose.position, position, atol=1e-6)
+            assert np.allclose(projectedPose.rotation, rotation, atol=1e-6)
+
+
+        def testConstantLinearVelocity(self):
+            position = np.array([1,2,3], dtype = np.float64)
+            rotation = np.eye(3, dtype=np.float64)
+            
+            pose= Pose(position=position, rotation=rotation)
+
+            linearVelocity = np.array([1.0, 1.0, 1.0, dtype=np.float64)
+            angularVelocity = np.array([0,0,0, dtype=np.float64)
+
+            twist = Twist(linearVelocity = linearVelocity, angularVelocity = angularVelocity)
+
+            horizon = 0.3
+            dt = 0.1
+
+            projectedPose, ProjectTwist = projectObjectState(pose, twist, latency, dt)
+
+            expectedPosition = np.array([0.3, 0.3, 0.3], dtype=np.float64)
+
+            assert np.allclose(projectedPose.position, expectedPosition, atol=1e-6)
+            assert np.allclose(projectedPose.rotation, rotation, atol=1e-6)
+
+        def testConstantAngularVelocity(self):
+            position = np.array([1,2,3], dtype = np.float64)
+            rotation = np.eye(3, dtype=np.float64)
+            
+            pose= Pose(position=position, rotation=rotation)
+
+            linearVelocity = np.array([0, 0, 0, dtype=np.float64)
+            angularVelocity = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+
+            twist = Twist(linearVelocity = linearVelocity, angularVelocity = angularVelocity)
+
+            horizon = 0.3
+            dt = 0.1
+
+            projectedPose, ProjectTwist = projectObjectState(pose, twist, latency, dt)
+
+            expectedPosition = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+
+            #TODO put expected position here
+            expectedRotation = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+
+            assert np.allclose(projectedPose.position, expectedPosition, atol=1e-6)
+            assert np.allclose(projectedPose.rotation, rotation, atol=1e-6)
+
+
+        def testAll(self):
+            position = np.array([1,2,3], dtype = np.float64)
+            rotation = np.eye(3, dtype=np.float64)
+            
+            pose= Pose(position=position, rotation=rotation)
+
+            linearVelocity = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+            angularVelocity = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+
+            twist = Twist(linearVelocity = linearVelocity, angularVelocity = angularVelocity)
+
+            horizon = 0.3
+            dt = 0.1
+
+            projectedPose, ProjectTwist = projectObjectState(pose, twist, latency, dt)
+
+            expectedPosition = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+
+            #TODO put expected position here
+            expectedRotation = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+
+            assert np.allclose(projectedPose.position, expectedPosition, atol=1e-6)
+            assert np.allclose(projectedPose.rotation, rotation, atol=1e-6)
+
+
+
+
+
+
+
+
+tests/test_controller.py
