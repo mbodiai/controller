@@ -1,0 +1,151 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{bm}
+
+\title{End Effector Trajectory Controller}
+\author{Your Name}
+
+\begin{document}
+
+\maketitle
+
+\section{Controller Overview}
+
+The end effector trajectory controller computes velocity commands to track a moving object's pose and twist. The controller uses a proportional control law with latency compensation to predict the object's future state.
+
+\section{Notation}
+
+\begin{itemize}
+    \item $\bm{p}_{ee}(t)$: End effector position at time $t$
+    \item $\bm{R}_{ee}(t)$: End effector rotation matrix at time $t$
+    \item $\bm{v}_{ee}(t)$: End effector linear velocity at time $t$
+    \item $\bm{\omega}_{ee}(t)$: End effector angular velocity at time $t$
+    \item $\bm{p}_{obj}(t)$: Object position at time $t$
+    \item $\bm{R}_{obj}(t)$: Object rotation matrix at time $t$
+    \item $\bm{v}_{obj}(t)$: Object linear velocity at time $t$
+    \item $\bm{\omega}_{obj}(t)$: Object angular velocity at time $t$
+    \item $k_P^{pos}$: Position proportional gain
+    \item $k_P^{rot}$: Rotation proportional gain
+    \item $\tau$: System latency
+    \item $\Delta t$: Simulation timestep
+\end{itemize}
+
+\section{Control Law}
+
+\subsection{Error Computation}
+
+The positional error is computed as:
+\begin{equation}
+    \bm{e}_{pos} = \bm{p}_{obj} - \bm{p}_{ee}
+\end{equation}
+
+The rotational error is computed in the end effector frame:
+\begin{equation}
+    \bm{R}_{err} = \bm{R}_{ee}^T \bm{R}_{obj}
+\end{equation}
+
+The rotational error vector $\bm{r}_{err}$ is extracted from $\bm{R}_{err}$ using the rotation vector representation:
+\begin{equation}
+    \bm{r}_{err} = \text{rotvec}(\bm{R}_{err})
+\end{equation}
+
+\subsection{Desired Velocity Computation}
+
+The desired linear velocity combines the object's velocity with a proportional correction term:
+\begin{equation}
+    \bm{v}_{des}^{lin} = \bm{v}_{obj} + k_P^{pos} \bm{e}_{pos}
+\end{equation}
+
+Similarly, the desired angular velocity is:
+\begin{equation}
+    \bm{\omega}_{des} = \bm{\omega}_{obj} + k_P^{rot} \bm{r}_{err}
+\end{equation}
+
+\subsection{Velocity Command}
+
+The velocity command (delta twist) is the difference between desired and current velocities:
+\begin{equation}
+    \Delta \bm{v} = \bm{v}_{des}^{lin} - \bm{v}_{ee}
+\end{equation}
+\begin{equation}
+    \Delta \bm{\omega} = \bm{\omega}_{des} - \bm{\omega}_{ee}
+\end{equation}
+
+\section{Latency Compensation}
+
+To account for system latency $\tau$, the controller predicts the object's future pose:
+\begin{equation}
+    \bm{p}_{obj}^{pred}(t + \tau) = \bm{p}_{obj}(t) + \bm{v}_{obj}(t) \cdot \tau
+\end{equation}
+
+The rotation is integrated forward:
+\begin{equation}
+    \bm{R}_{obj}^{pred}(t + \tau) = \bm{R}_{obj}(t) \cdot \exp(\bm{\omega}_{obj}(t) \times \tau)
+\end{equation}
+
+where $\exp(\cdot)$ denotes the matrix exponential for rotation integration.
+
+\section{Trajectory Simulation}
+
+The controller simulates the end effector trajectory over a horizon $T$ using the following algorithm:
+
+\begin{enumerate}
+    \item Initialize: $\bm{p}_{ee}(0) = \bm{p}_{ee,0}$, $\bm{R}_{ee}(0) = \bm{R}_{ee,0}$, $\bm{v}_{ee}(0) = \bm{v}_{ee,0}$, $\bm{\omega}_{ee}(0) = \bm{\omega}_{ee,0}$
+    
+    \item For each timestep $k = 1, 2, \ldots, N$ where $N = \lfloor T / \Delta t \rfloor$:
+    \begin{enumerate}
+        \item Predict object pose at $t + \tau$:
+        \begin{equation}
+            \bm{p}_{obj}^{pred} = \bm{p}_{obj}(k) + \bm{v}_{obj}(k) \cdot \tau
+        \end{equation}
+        
+        \item Compute velocity command $\Delta \bm{v}(k)$, $\Delta \bm{\omega}(k)$ using equations (1)-(7)
+        
+        \item Update end effector velocity:
+        \begin{equation}
+            \bm{v}_{ee}(k+1) = \bm{v}_{ee}(k) + \Delta \bm{v}(k)
+        \end{equation}
+        \begin{equation}
+            \bm{\omega}_{ee}(k+1) = \bm{\omega}_{ee}(k) + \Delta \bm{\omega}(k)
+        \end{equation}
+        
+        \item Integrate end effector pose:
+        \begin{equation}
+            \bm{p}_{ee}(k+1) = \bm{p}_{ee}(k) + \bm{v}_{ee}(k+1) \cdot \Delta t
+        \end{equation}
+        \begin{equation}
+            \bm{R}_{ee}(k+1) = \bm{R}_{ee}(k) \cdot \exp(\bm{\omega}_{ee}(k+1) \times \Delta t)
+        \end{equation}
+        
+        \item Integrate object pose (assuming constant velocity):
+        \begin{equation}
+            \bm{p}_{obj}(k+1) = \bm{p}_{obj}(k) + \bm{v}_{obj}(k) \cdot \Delta t
+        \end{equation}
+        \begin{equation}
+            \bm{R}_{obj}(k+1) = \bm{R}_{obj}(k) \cdot \exp(\bm{\omega}_{obj}(k) \times \Delta t)
+        \end{equation}
+    \end{enumerate}
+\end{enumerate}
+
+\section{Controller Parameters}
+
+The controller configuration includes:
+\begin{itemize}
+    \item $k_P^{pos}$: Position proportional gain (units: s$^{-1}$)
+    \item $k_P^{rot}$: Rotation proportional gain (units: s$^{-1}$)
+    \item $\tau$: System latency (units: s)
+    \item $T$: Simulation horizon (units: s)
+    \item $\Delta t$: Timestep (units: s)
+\end{itemize}
+
+\section{Properties}
+
+\begin{itemize}
+    \item The controller uses feedforward from the object's velocity, enabling tracking of moving targets
+    \item Latency compensation reduces tracking error for delayed systems
+    \item The proportional control law ensures convergence to zero position and rotation error for static targets
+    \item The controller is suitable for real-time trajectory generation and simulation
+\end{itemize}
+
+\end{document}
