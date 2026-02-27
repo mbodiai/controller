@@ -1,25 +1,15 @@
-from numpy.typing import NDArray
-import numpy as np
+"""Re-export manifold projection utility used by the controller.
 
-from .datatypes import Pose, Twist 
-from .geometry import integratePosition, integrateRotation 
+The canonical implementation lives in manifold.utils.geometry.project_pose.
+This module provides the backward-compatible alias.
+"""
 
+from manifold.utils.geometry import project_pose
 
-def projectObjectState(currentPose: Pose, currentTwist: Twist, horizon: float, dt: float ) -> Pose:
-    
-    if (horizon < dt):
-        a = 5
-        #do something here
-        
-    nSteps = int(horizon/dt)
-    position = currentPose.position.copy()    
-    rotation = currentPose.rotation.copy()    
-    
-    linearVelocity = currentTwist.linearVelocity.copy()
-    angularVelocity = currentTwist.angularVelocity.copy()
-    
-    for step in range(nSteps):
-        position = integratePosition(position, linearVelocity, dt )
-        rotation = integrateRotation(rotation, angularVelocity, dt)
+# Backward-compatible alias
+projectObjectState = project_pose
 
-    return Pose(position = position, rotation = rotation)        
+__all__ = [
+    "project_pose",
+    "projectObjectState",
+]
