@@ -104,6 +104,6 @@ The controller configuration includes:
 - The controller uses feedforward from the object's velocity, enabling tracking of moving targets
 - Latency compensation reduces tracking error for delayed systems
 - The proportional control law ensures convergence to zero position and rotation error for static targets
-- The controller is suitable for real-time trajectory generation and simulation
+- The controller is suitable for real-time trajectory generation and simulation.
 
 
