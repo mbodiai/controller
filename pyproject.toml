@@ -1,9 +1,14 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "control"
 version = "0.1.0"
 description = "End effector controller to track object Pose, Twist"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Mbodi Team", email = "info@mbodi.ai" }]
 dependencies = [
     "numpy>=1.24.0",
     "scipy>=1.10.0",
@@ -18,10 +23,6 @@ dev = [
     "ruff",
 ]
 
-[build-system]
-requires = ["setuptools>=61"]
-build-backend = "setuptools.build_meta"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -29,26 +30,84 @@ where = ["src"]
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 120
 indent-width = 4
+line-length = 140
 target-version = "py311"
 
-[tool.ruff.lint]
 select = [
-    "A", "C4", "D", "E", "F", "UP", "B", "SIM",
-    "N", "ANN", "ASYNC", "S", "T20", "RET", "ARG",
-    "PTH", "ERA", "PD", "I", "PLW",
+    # flake8-builtins
+    "A",
+    # flake8-commas
+    "COM812",
+    # flake8-comprehensions
+    "C4",
+    # pydocstyle
+    "D",
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # pep8-naming
+    "N",
+    # flake8-annotations
+    "ANN",
+    # flake8-async
+    "ASYNC",
+    # flake8-bandit
+    "S",
+    # flake8-print
+    "T20",
+    # flake8-return
+    "RET",
+    # flake8-unused-arguments
+    "ARG",
+    # flake8-use-pathlib
+    "PTH",
+    # eradicate
+    "ERA",
+    # pandas-vet
+    "PD",
+    # Import sort
+    "I",
+    # avoid shadowing
+    "PLW",
 ]
 ignore = [
-    "D100", "D101", "D104", "D106",
-    "ANN101", "ANN102", "ANN003", "UP009",
-    "ANN204", "B026", "ANN001", "ANN401",
-    "ANN202", "D107", "D102", "D103",
-    "E731", "UP006", "UP035", "ANN002",
-    "PLW2901", "E741", "E501", "N806",
+    "D105",
+    "N805",
+    "N802",
+    "N806",
+    "PGH004",
+    "D100",
+    "D101",
+    "D104",
+    "D106",
+    "ANN003",
+    "ANN204",
+    "UP009",
+    "B026",
+    "ANN001",
+    "ANN401",
+    "ANN202",
+    "D107",
+    "D102",
+    "D103",
+    "E731",
+    "UP006",
+    "UP007",
+    "UP044",
+    "UP035",
+    "ANN002",
+    "N801",
+    "N803",
+    "D417",
 ]
-fixable = ["ALL"]
-unfixable = []
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -60,6 +119,11 @@ line-ending = "auto"
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-single-line = false
+
 [tool.ruff.lint.per-file-ignores]
-"**/{tests,docs}/*" = ["ALL"]
+"**/{docs}/*" = ["ALL"]
+"**/{tests}/*" = ["S101", "ANN201"]
 "**__init__.py" = ["F401"]
