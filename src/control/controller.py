@@ -17,61 +17,6 @@ from manifold.utils.geometry import (
 )
 
 
-# ────────────────────────────────────────────────────────────────
-# Raw-array core (no Pose6D constructed mid-loop)
-# ────────────────────────────────────────────────────────────────
-
-def _compute_single_delta_raw(
-    ee_pos: np.ndarray,
-    ee_rot: np.ndarray,
-    ee_lin_vel: np.ndarray,
-    ee_ang_vel: np.ndarray,
-    obj_pos: np.ndarray,
-    obj_rot: np.ndarray,
-    obj_lin_vel: np.ndarray,
-    obj_ang_vel: np.ndarray,
-    params: TrajectoryControllerConfig,
-    velocity_bias: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute a single velocity correction step on raw numpy arrays.
-
-    Applies the control law:
-        linear_delta  = (v_obj + kp_position * (p_obj - p_ee)) + velocity_bias - v_ee
-        angular_delta = (w_obj + kp_rotation * rotvec(R_ee^T @ R_obj)) - w_ee
-
-    When params.linear_only is True, angular_delta is returned as zeros.
-
-    Args:
-        ee_pos: End effector position (3,).
-        ee_rot: End effector rotation matrix (3, 3).
-        ee_lin_vel: End effector linear velocity (3,).
-        ee_ang_vel: End effector angular velocity (3,).
-        obj_pos: Object position (3,).
-        obj_rot: Object rotation matrix (3, 3).
-        obj_lin_vel: Object linear velocity (3,).
-        obj_ang_vel: Object angular velocity (3,).
-        params: Controller configuration (gains, flags).
-        velocity_bias: Optional additive bias on the desired linear velocity (3,).
-
-    Returns:
-        Tuple of (linear_delta, angular_delta), each shape (3,).
-    """
-    linear_error = obj_pos - ee_pos
-    desired_lin_vel = obj_lin_vel + linear_error * params.kp_position
-    if velocity_bias is not None:
-        desired_lin_vel = desired_lin_vel + velocity_bias
-    lin_delta = desired_lin_vel - ee_lin_vel
-
-    if params.linear_only:
-        return lin_delta, np.zeros(3, dtype=np.float64)
-
-    rot_error = rotvec_from_matrix(ee_rot.T @ obj_rot)
-    desired_ang_vel = obj_ang_vel + rot_error * params.kp_rotation
-    ang_delta = desired_ang_vel - ee_ang_vel
-
-    return lin_delta, ang_delta
-
-
 def _project_state(
     pos: np.ndarray,
     rot: np.ndarray,
@@ -117,33 +62,40 @@ def computeSingleDeltaTwist(
     objPose: Pose6D,
     objTwist: Twist,
     params: TrajectoryControllerConfig,
+    velocity_bias: np.ndarray | None = None,
 ) -> Twist:
-    """Compute a single delta twist from manifold types.
+    """Compute a single velocity correction step (proportional + feedforward).
 
-    Convenience wrapper around _compute_single_delta_raw that unpacks
-    Pose6D/Twist into numpy arrays and repacks the result.
+    Applies the control law:
+        linear_delta  = (v_obj + kp_position * (p_obj - p_ee)) + velocity_bias - v_ee
+        angular_delta = (w_obj + kp_rotation * rotvec(R_ee^T @ R_obj)) - w_ee
+
+    When params.linear_only is True, angular_delta is zero.
 
     Args:
         eePose: End effector pose.
         eeTwist: End effector twist.
         objPose: Object pose.
         objTwist: Object twist.
-        params: Controller configuration.
+        params: Controller configuration (gains, flags).
+        velocity_bias: Optional additive bias on the desired linear velocity (3,).
 
     Returns:
         Delta twist to apply to the end effector.
     """
-    lin_delta, ang_delta = _compute_single_delta_raw(
-        np.asarray(eePose.position, dtype=np.float64),
-        np.asarray(eePose.rotation_matrix, dtype=np.float64),
-        np.asarray(eeTwist.linear, dtype=np.float64),
-        np.asarray(eeTwist.angular, dtype=np.float64),
-        np.asarray(objPose.position, dtype=np.float64),
-        np.asarray(objPose.rotation_matrix, dtype=np.float64),
-        np.asarray(objTwist.linear, dtype=np.float64),
-        np.asarray(objTwist.angular, dtype=np.float64),
-        params,
-    )
+    linear_error = objPose.position - eePose.position
+    desired_lin_vel = objTwist.linear + linear_error * params.kp_position
+    if velocity_bias is not None:
+        desired_lin_vel = desired_lin_vel + velocity_bias
+    lin_delta = desired_lin_vel - eeTwist.linear
+
+    if params.linear_only:
+        return Twist.from_linear_angular(lin_delta, np.zeros(3, dtype=np.float64))
+
+    rot_error = rotvec_from_matrix(eePose.rotation_matrix.T @ objPose.rotation_matrix)
+    desired_ang_vel = objTwist.angular + rot_error * params.kp_rotation
+    ang_delta = desired_ang_vel - eeTwist.angular
+
     return Twist.from_linear_angular(lin_delta, ang_delta)
 
 
@@ -182,53 +134,56 @@ def computeDeltaTwists(
     if max_steps is not None:
         nSteps = max(3, min(nSteps, max_steps))
 
-    obj_pos = np.array(objPose.position, dtype=np.float64)
-    obj_rot = np.array(objPose.rotation_matrix, dtype=np.float64)
-    obj_lin = np.array(objTwist.linear, dtype=np.float64)
-    obj_ang = np.array(objTwist.angular, dtype=np.float64)
-
-    ee_pos = np.array(eePose.position, dtype=np.float64)
-    ee_rot = np.array(eePose.rotation_matrix, dtype=np.float64)
-    ee_lin = np.array(eeTwist.linear, dtype=np.float64)
-    ee_ang = np.array(eeTwist.angular, dtype=np.float64)
+    ee_pose = eePose
+    ee_twist = eeTwist
+    obj_pose = objPose
+    obj_twist = objTwist
 
     steps: list[TrajectoryStep] = [TrajectoryStep(
         time=0.0,
-        ee_pose=Pose6D.from_position_and_rotation_matrix(ee_pos, ee_rot),
-        ee_twist=Twist.from_linear_angular(ee_lin, ee_ang),
-        object_pose=Pose6D.from_position_and_rotation_matrix(obj_pos, obj_rot),
-        object_twist=Twist.from_linear_angular(obj_lin, obj_ang),
+        ee_pose=ee_pose,
+        ee_twist=ee_twist,
+        object_pose=obj_pose,
+        object_twist=obj_twist,
         delta_twist=Twist.zero(),
     )]
 
     for step in range(1, nSteps):
-        lin_delta, ang_delta = _compute_single_delta_raw(
-            ee_pos, ee_rot, ee_lin, ee_ang,
-            obj_pos, obj_rot, obj_lin, obj_ang,
+        delta = computeSingleDeltaTwist(
+            ee_pose, ee_twist, obj_pose, obj_twist,
             params, velocity_bias=velocity_bias,
         )
 
-        ee_lin = ee_lin + lin_delta
-        ee_ang = ee_ang + ang_delta
+        ee_lin = ee_twist.linear + delta.linear
+        ee_ang = ee_twist.angular + delta.angular
         speed = np.linalg.norm(ee_lin)
         if speed > max_linear_velocity:
             ee_lin = ee_lin * (max_linear_velocity / speed)
 
         ee_pos, ee_rot = _project_state(
-            ee_pos, ee_rot, ee_lin, ee_ang, dt, dt, linear_only,
+            np.asarray(ee_pose.position, dtype=np.float64),
+            np.asarray(ee_pose.rotation_matrix, dtype=np.float64),
+            ee_lin, ee_ang, dt, dt, linear_only,
+        )
+        obj_pos, obj_rot = _project_state(
+            np.asarray(obj_pose.position, dtype=np.float64),
+            np.asarray(obj_pose.rotation_matrix, dtype=np.float64),
+            np.asarray(obj_twist.linear, dtype=np.float64),
+            np.asarray(obj_twist.angular, dtype=np.float64),
+            dt, dt, linear_only,
         )
 
-        obj_pos, obj_rot = _project_state(
-            obj_pos, obj_rot, obj_lin, obj_ang, dt, dt, linear_only,
-        )
+        ee_pose = Pose6D.from_position_and_rotation_matrix(ee_pos, ee_rot)
+        ee_twist = Twist.from_linear_angular(ee_lin, ee_ang)
+        obj_pose = Pose6D.from_position_and_rotation_matrix(obj_pos, obj_rot)
 
         steps.append(TrajectoryStep(
             time=float(step) * dt,
-            ee_pose=Pose6D.from_position_and_rotation_matrix(ee_pos, ee_rot),
-            ee_twist=Twist.from_linear_angular(ee_lin, ee_ang),
-            object_pose=Pose6D.from_position_and_rotation_matrix(obj_pos, obj_rot),
-            object_twist=Twist.from_linear_angular(obj_lin, obj_ang),
-            delta_twist=Twist.from_linear_angular(lin_delta, ang_delta),
+            ee_pose=ee_pose,
+            ee_twist=ee_twist,
+            object_pose=obj_pose,
+            object_twist=obj_twist,
+            delta_twist=delta,
         ))
 
     return Trajectory(steps=steps)
