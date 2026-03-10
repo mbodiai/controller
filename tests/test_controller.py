@@ -1,7 +1,7 @@
 from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.trajectory import TrajectoryControllerConfig
-from control import computeSingleDeltaTwist, computeDeltaTwists, computeMetrics, plotMetrics, return_data
+from control import computeSingleDeltaTwist, computeDeltaTwists, computeMetrics, plotMetrics
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -51,8 +51,7 @@ class TestController:
             - np.asarray(traj.steps[-1].object_pose.position)
         )
 
-        data = return_data(traj)
-        ee_positions = data['ee_positions']
+        ee_positions = np.array([np.asarray(s.ee_pose.position) for s in traj.steps])
 
         print("\n")
         for index, element in enumerate(ee_positions):
@@ -227,21 +226,18 @@ class TestController:
 
         traj = computeDeltaTwists(ee_pose, ee_twist, obj_pose, obj_twist, config)
 
-        data = return_data(traj)
-        time = data['time']
-        ee_velocities = data['ee_linear_velocities']
-
-        final_ee_position = data['ee_positions'][-1]
-        final_obj_position = data['object_positions'][-1]
+        final_step = traj.steps[-1]
+        final_ee_position = np.asarray(final_step.ee_pose.position)
+        final_obj_position = np.asarray(final_step.object_pose.position)
         final_pos_error = np.linalg.norm(final_obj_position - final_ee_position)
 
-        final_ee_velocity = ee_velocities[-1]
+        final_ee_velocity = np.asarray(final_step.ee_twist.linear)
         target_velocity = np.asarray(obj_twist.linear)
 
         velocity_error = np.linalg.norm(final_ee_velocity - target_velocity)
 
-        final_ee_rotation = data['ee_rotations'][-1]
-        final_obj_rotation = data['object_rotations'][-1]
+        final_ee_rotation = np.asarray(final_step.ee_pose.rotation_matrix)
+        final_obj_rotation = np.asarray(final_step.object_pose.rotation_matrix)
         rot_error = np.matmul(final_ee_rotation.T, final_obj_rotation)
         rot_error_vec = Rotation.from_matrix(rot_error).as_rotvec()
         final_rot_error_mag = np.linalg.norm(rot_error_vec)

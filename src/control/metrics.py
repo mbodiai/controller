@@ -5,20 +5,14 @@ from manifold.types.common.pose import Pose6D
 from manifold.types.act.trajectory import Trajectory
 from manifold.utils.geometry import rotvec_from_matrix, rotation_error
 
-from .utils import return_data
-
-
 def computeMetrics(t: Trajectory, targetPose: Pose6D, slidingWindowTime: np.float64):
 
-    data = return_data(t)
-
-    time = data['time']
-
-    eePositions = data['ee_positions']
-    eeRotations = data['ee_rotations']
-
-    objPositions = data['object_positions']
-    objRotations = data['object_rotations']
+    steps = t.steps
+    time = np.array([s.time for s in steps], dtype=np.float64)
+    eePositions = np.array([np.asarray(s.ee_pose.position, dtype=np.float64) for s in steps])
+    eeRotations = np.array([np.asarray(s.ee_pose.rotation_matrix, dtype=np.float64) for s in steps])
+    objPositions = np.array([np.asarray(s.object_pose.position, dtype=np.float64) for s in steps])
+    objRotations = np.array([np.asarray(s.object_pose.rotation_matrix, dtype=np.float64) for s in steps])
 
     ee_rotationVectors = []
     obj_rotationVectors = []
@@ -46,11 +40,10 @@ def computeMetrics(t: Trajectory, targetPose: Pose6D, slidingWindowTime: np.floa
     outMetrics['eePositions'] = eePositions
     outMetrics['objPositions'] = objPositions
 
-    outMetrics['ee_linear_velocities'] = data['ee_linear_velocities']
-    outMetrics['object_linear_velocities'] = data['object_linear_velocities']
-
-    outMetrics['ee_angular_velocities'] = data['ee_angular_velocities']
-    outMetrics['object_angular_velocities'] = data['object_angular_velocities']
+    outMetrics['ee_linear_velocities'] = np.array([np.asarray(s.ee_twist.linear, dtype=np.float64) for s in steps])
+    outMetrics['object_linear_velocities'] = np.array([np.asarray(s.object_twist.linear, dtype=np.float64) for s in steps])
+    outMetrics['ee_angular_velocities'] = np.array([np.asarray(s.ee_twist.angular, dtype=np.float64) for s in steps])
+    outMetrics['object_angular_velocities'] = np.array([np.asarray(s.object_twist.angular, dtype=np.float64) for s in steps])
 
     outMetrics['eeRotations'] = eeRotations
     outMetrics['objRotations'] = objRotations
