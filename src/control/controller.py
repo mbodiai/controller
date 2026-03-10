@@ -29,10 +29,13 @@ def _compute_single_delta_raw(
     obj_lin_vel: np.ndarray,
     obj_ang_vel: np.ndarray,
     params: TrajectoryControllerConfig,
+    velocity_bias: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute delta twist as raw arrays. Returns (linear_delta, angular_delta)."""
     linear_error = obj_pos - ee_pos
     desired_lin_vel = obj_lin_vel + linear_error * params.kp_position
+    if velocity_bias is not None:
+        desired_lin_vel = desired_lin_vel + velocity_bias
     lin_delta = desired_lin_vel - ee_lin_vel
 
     if params.linear_only:
@@ -94,11 +97,16 @@ def computeDeltaTwists(
     objPose: Pose6D,
     objTwist: Twist,
     params: TrajectoryControllerConfig,
+    max_linear_velocity: float = float("inf"),
+    velocity_bias: np.ndarray | None = None,
+    max_steps: int | None = None,
 ) -> Trajectory:
 
     dt = params.dt
     linear_only = params.linear_only
-    nSteps = int(params.simulation_horizon / dt)
+    nSteps = max(3, int(params.latency / dt) + 1)
+    if max_steps is not None:
+        nSteps = max(3, min(nSteps, max_steps))
 
     # Extract raw arrays from inputs
     obj_pos = np.array(objPose.position, dtype=np.float64)
@@ -121,23 +129,19 @@ def computeDeltaTwists(
     )]
 
     for step in range(1, nSteps):
-        # Latency compensation
-        comp_obj_pos, comp_obj_rot = _project_state(
-            obj_pos.copy(), obj_rot.copy(),
-            obj_lin, obj_ang,
-            params.latency, dt, linear_only,
-        )
-
         # Delta twist
         lin_delta, ang_delta = _compute_single_delta_raw(
             ee_pos, ee_rot, ee_lin, ee_ang,
-            comp_obj_pos, comp_obj_rot, obj_lin, obj_ang,
-            params,
+            obj_pos, obj_rot, obj_lin, obj_ang,
+            params, velocity_bias=velocity_bias,
         )
 
-        # Update EE velocity
+        # Update EE velocity and clamp to max
         ee_lin = ee_lin + lin_delta
         ee_ang = ee_ang + ang_delta
+        speed = np.linalg.norm(ee_lin)
+        if speed > max_linear_velocity:
+            ee_lin = ee_lin * (max_linear_velocity / speed)
 
         # Integrate EE state forward
         ee_pos, ee_rot = _project_state(
@@ -169,11 +173,15 @@ def computeDeltaTwists(
 class TrajectoryController:
     """Wraps the stateless planning functions with plan history for drift correction."""
 
-    def __init__(self, config: TrajectoryControllerConfig) -> None:
+    def __init__(self, config: TrajectoryControllerConfig, max_linear_velocity: float = 0.5) -> None:
         self.config = config
+        self.max_linear_velocity = max_linear_velocity
         self._last_plan: Trajectory | None = None
         self._last_plan_time: float | None = None
         self._last_pushed_index: int = 0
+        self.last_blend_elapsed: float = 0.0
+        self.last_pos_drift_norm: float = 0.0
+        self.last_rot_drift_norm: float = 0.0
 
     def compute_blended_start(
         self,
@@ -218,6 +226,10 @@ class TrajectoryController:
         pos_drift = measured_pos - pred_pos
         rot_drift = measured_rpy - pred_rpy
 
+        self.last_blend_elapsed = elapsed
+        self.last_pos_drift_norm = float(np.linalg.norm(pos_drift))
+        self.last_rot_drift_norm = float(np.linalg.norm(rot_drift))
+
         alpha = self.config.drift_alpha
         beta = self.config.drift_beta
         inv_dt = 1.0 / max(dt, 0.001)
@@ -253,10 +265,15 @@ class TrajectoryController:
         obj_pose: Pose6D,
         obj_twist: Twist,
         now: float,
+        velocity_bias: np.ndarray | None = None,
+        max_steps: int | None = None,
     ) -> Trajectory:
         """Plan a trajectory from the given start state. Stores result for next drift correction."""
         trajectory = computeDeltaTwists(
             ee_pose, ee_twist, obj_pose, obj_twist, self.config,
+            max_linear_velocity=self.max_linear_velocity,
+            velocity_bias=velocity_bias,
+            max_steps=max_steps,
         )
 
         self._last_plan = trajectory
@@ -270,26 +287,18 @@ class TrajectoryController:
         current_orientation: tuple[float, float, float],
         grasp: float = 0.0,
     ) -> list[HandControl]:
-        """Convert trajectory steps to HandControls with time-based motion."""
+        """Convert trajectory steps to HandControls (speed-based or time-based per config.speed_mode)."""
         roll, pitch, yaw = current_orientation
         results = []
 
-        for i, step in enumerate(trajectory.steps):
-            dt = (
-                step.time - trajectory.steps[i - 1].time
-                if i > 0
-                else step.time
-            )
-            results.append(HandControl(
-                pose=Pose6D(
-                    x=step.ee_pose.x,
-                    y=step.ee_pose.y,
-                    z=step.ee_pose.z,
-                    roll=roll, pitch=pitch, yaw=yaw,
-                ),
-                grasp=grasp,
-                time=dt,
-            ))
+        for i, step in enumerate(trajectory.steps[1:], start=1):
+            pose = Pose6D(x=step.ee_pose.x, y=step.ee_pose.y, z=step.ee_pose.z, roll=roll, pitch=pitch, yaw=yaw)
+            if self.config.speed_mode:
+                linear_speed = float(np.linalg.norm([step.ee_twist.vx, step.ee_twist.vy, step.ee_twist.vz]))
+                results.append(HandControl(pose=pose, grasp=grasp, speed=max(linear_speed, 0.05)))
+            else:
+                dt = step.time - trajectory.steps[i - 1].time if i > 0 else step.time
+                results.append(HandControl(pose=pose, grasp=grasp, time=dt))
 
         return results
 
