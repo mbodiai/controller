@@ -17,48 +17,6 @@ from manifold.utils.geometry import (
 )
 
 
-# ────────────────────────────────────────────────────────────────
-# Raw-array core (no Pose6D constructed mid-loop)
-# ────────────────────────────────────────────────────────────────
-
-def _compute_single_delta_raw(
-    ee_pos: np.ndarray,
-    ee_rot: np.ndarray,
-    ee_lin_vel: np.ndarray,
-    ee_ang_vel: np.ndarray,
-    obj_pos: np.ndarray,
-    obj_rot: np.ndarray,
-    obj_lin_vel: np.ndarray,
-    obj_ang_vel: np.ndarray,
-    params: TrajectoryControllerConfig,
-    velocity_bias: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute a single velocity correction step on raw numpy arrays.
-
-    Applies the control law:
-        linear_delta  = (v_obj + kp_position * (p_obj - p_ee)) + velocity_bias - v_ee
-        angular_delta = (w_obj + kp_rotation * rotvec(R_ee^T @ R_obj)) - w_ee
-
-    When params.linear_only is True, angular_delta is returned as zeros.
-
-    Args:
-        ee_pos: End effector position (3,).
-        ee_rot: End effector rotation matrix (3, 3).
-        ee_lin_vel: End effector linear velocity (3,).
-        ee_ang_vel: End effector angular velocity (3,).
-        obj_pos: Object position (3,).
-        obj_rot: Object rotation matrix (3, 3).
-        obj_lin_vel: Object linear velocity (3,).
-        obj_ang_vel: Object angular velocity (3,).
-        params: Controller configuration (gains, flags).
-        velocity_bias: Optional additive bias on the desired linear velocity (3,).
-
-    Returns:
-        Tuple of (linear_delta, angular_delta), each shape (3,).
-    """
-    raise NotImplementedError
-
-
 def _project_state(
     pos: np.ndarray,
     rot: np.ndarray,
@@ -99,18 +57,23 @@ def computeSingleDeltaTwist(
     objPose: Pose6D,
     objTwist: Twist,
     params: TrajectoryControllerConfig,
+    velocity_bias: np.ndarray | None = None,
 ) -> Twist:
-    """Compute a single delta twist from manifold types.
+    """Compute a single velocity correction step (proportional + feedforward).
 
-    Convenience wrapper around _compute_single_delta_raw that unpacks
-    Pose6D/Twist into numpy arrays and repacks the result.
+    Applies the control law:
+        linear_delta  = (v_obj + kp_position * (p_obj - p_ee)) + velocity_bias - v_ee
+        angular_delta = (w_obj + kp_rotation * rotvec(R_ee^T @ R_obj)) - w_ee
+
+    When params.linear_only is True, angular_delta is zero.
 
     Args:
         eePose: End effector pose.
         eeTwist: End effector twist.
         objPose: Object pose.
         objTwist: Object twist.
-        params: Controller configuration.
+        params: Controller configuration (gains, flags).
+        velocity_bias: Optional additive bias on the desired linear velocity (3,).
 
     Returns:
         Delta twist to apply to the end effector.
