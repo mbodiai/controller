@@ -1,3 +1,5 @@
+from collections import deque
+
 import numpy as np
 
 from manifold.types.common.pose import Pose6D
@@ -182,6 +184,10 @@ class TrajectoryController:
         self.last_blend_elapsed: float = 0.0
         self.last_pos_drift_norm: float = 0.0
         self.last_rot_drift_norm: float = 0.0
+        self._last_pushed_pose: Pose6D | None = None
+        self._last_pushed_twist: Twist | None = None
+        self._consumed_positions: deque[tuple[int, np.ndarray]] = deque(maxlen=200)
+        self._last_seen_consumed: int = 0
 
     def compute_blended_start(
         self,
@@ -257,6 +263,79 @@ class TrajectoryController:
         )
 
         return blended_pose, blended_twist
+
+    def project_object(self, obj_pose: Pose6D, obj_twist: Twist, buffer_depth: int) -> Pose6D:
+        """Forward-project object pose to compensate for buffer delay."""
+        delay = buffer_depth * self.config.dt
+        return Pose6D(
+            x=obj_pose.x + obj_twist.vx * delay,
+            y=obj_pose.y + obj_twist.vy * delay,
+            z=obj_pose.z + obj_twist.vz * delay,
+            roll=obj_pose.roll, pitch=obj_pose.pitch, yaw=obj_pose.yaw,
+        )
+
+    def record_push_result(
+        self, trajectory: Trajectory, pushed_count: int,
+        depth_before: int, total_consumed: int,
+    ) -> None:
+        """Record pushed waypoints for consumed-position drift tracking."""
+        if pushed_count > 0:
+            last_step = trajectory.steps[min(pushed_count, len(trajectory.steps) - 1)]
+            self._last_pushed_pose = last_step.ee_pose
+            self._last_pushed_twist = last_step.ee_twist
+        for i in range(pushed_count):
+            step = trajectory.steps[i + 1]
+            pos = np.array([step.ee_pose.x, step.ee_pose.y, step.ee_pose.z])
+            self._consumed_positions.append((total_consumed + depth_before + i + 1, pos))
+
+    def clear_last_pushed(self) -> None:
+        """Clear last-pushed state when buffer drains completely."""
+        self._last_pushed_pose = None
+        self._last_pushed_twist = None
+
+    def compute_drift_correction(
+        self, measured_pose: Pose6D, total_consumed: int,
+    ) -> tuple[np.ndarray | None, np.ndarray]:
+        """Compute velocity bias from consumed-position tracking error.
+
+        Returns (velocity_bias, tracking_error). velocity_bias is None when
+        there is insufficient history.
+        """
+        tracking_error = np.zeros(3, dtype=np.float64)
+        if not self._consumed_positions:
+            return None, tracking_error
+        if total_consumed > self._last_seen_consumed:
+            self._last_seen_consumed = total_consumed
+        expected = self._lookup_consumed_position(total_consumed)
+        if expected is None:
+            return None, tracking_error
+        measured = np.array([measured_pose.x, measured_pose.y, measured_pose.z])
+        tracking_error = expected - measured
+        return self.config.kp_drift * tracking_error, tracking_error
+
+    def get_start_state(
+        self, measured_pose: Pose6D, measured_twist: Twist,
+        now: float, last_pushed_count: int, disable_blend: bool = False,
+    ) -> tuple[Pose6D, Twist]:
+        """Determine planning start state: last-pushed tail, blended, or measured."""
+        if self._last_pushed_pose is not None:
+            return self._last_pushed_pose, self._last_pushed_twist
+        if not disable_blend:
+            return self.compute_blended_start(measured_pose, measured_twist, now, last_pushed_count)
+        return measured_pose, measured_twist
+
+    def _lookup_consumed_position(self, consumed_count: int) -> np.ndarray | None:
+        while len(self._consumed_positions) > 1 and self._consumed_positions[0][0] < consumed_count:
+            self._consumed_positions.popleft()
+        if not self._consumed_positions:
+            return None
+        best = None
+        for count, pos in self._consumed_positions:
+            if count <= consumed_count:
+                best = pos
+            elif count > consumed_count:
+                break
+        return best.copy() if best is not None else None
 
     def compute_trajectory(
         self,
