@@ -1,4 +1,5 @@
 from collections import deque
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -193,23 +194,23 @@ def computeDeltaTwists(
 # Stateful controller (drift correction + planning)
 # ────────────────────────────────────────────────────────────────
 
+@dataclass
 class TrajectoryController:
     """Wraps the stateless planning functions with state for drift correction,
     consumed-position tracking, and start-state selection."""
 
-    def __init__(self, config: TrajectoryControllerConfig, max_linear_velocity: float = 0.5) -> None:
-        self.config = config
-        self.max_linear_velocity = max_linear_velocity
-        self._last_plan: Trajectory | None = None
-        self._last_plan_time: float | None = None
-        self._last_pushed_index: int = 0
-        self.last_blend_elapsed: float = 0.0
-        self.last_pos_drift_norm: float = 0.0
-        self.last_rot_drift_norm: float = 0.0
-        self._last_pushed_pose: Pose6D | None = None
-        self._last_pushed_twist: Twist | None = None
-        self._consumed_positions: deque[tuple[int, np.ndarray]] = deque(maxlen=200)
-        self._last_seen_consumed: int = 0
+    config: TrajectoryControllerConfig
+    max_linear_velocity: float = 0.5
+    _last_plan: Trajectory | None = field(default=None, init=False)
+    _last_plan_time: float | None = field(default=None, init=False)
+    _last_pushed_index: int = field(default=0, init=False)
+    last_blend_elapsed: float = field(default=0.0, init=False)
+    last_pos_drift_norm: float = field(default=0.0, init=False)
+    last_rot_drift_norm: float = field(default=0.0, init=False)
+    _last_pushed_pose: Pose6D | None = field(default=None, init=False)
+    _last_pushed_twist: Twist | None = field(default=None, init=False)
+    _consumed_positions: deque[tuple[int, np.ndarray]] = field(default_factory=lambda: deque(maxlen=200), init=False)
+    _last_seen_consumed: int = field(default=0, init=False)
 
     def compute_blended_start(
         self,
