@@ -465,7 +465,7 @@ class TrajectoryController:
         velocity_bias: np.ndarray | None = None,
         max_steps: int | None = None,
     ) -> Trajectory:
-        """Plan a trajectory from the given start state.
+        """ Plan a trajectory of timestamped EE waypoints to track an object
 
         Delegates to computeDeltaTwists. Also stores the result internally
         for compute_blended_start (starvation recovery fallback; not used
