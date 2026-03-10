@@ -467,15 +467,16 @@ class TrajectoryController:
     ) -> Trajectory:
         """Plan a trajectory from the given start state.
 
-        Delegates to computeDeltaTwists and stores the result as _last_plan
-        for subsequent drift correction via compute_blended_start.
+        Delegates to computeDeltaTwists. Also stores the result internally
+        for compute_blended_start (starvation recovery fallback; not used
+        during normal operation where last-pushed state provides continuity).
 
         Args:
             ee_pose: Planning start pose (from get_start_state).
             ee_twist: Planning start twist.
             obj_pose: Object pose (typically forward-projected).
             obj_twist: Object twist.
-            now: Current wall-clock time (stored for plan interpolation).
+            now: Current wall-clock time.
             velocity_bias: Optional drift correction bias.
             max_steps: Optional cap on trajectory length.
 
