@@ -1,8 +1,7 @@
-from control import (
-    Pose6D, Twist, TrajectoryControllerConfig,
-    computeSingleDeltaTwist, computeDeltaTwists,
-    computeMetrics, plotMetrics, return_data,
-)
+from manifold.types.common.pose import Pose6D
+from manifold.types.common.twist import Twist
+from manifold.types.act.trajectory import TrajectoryControllerConfig
+from control import computeSingleDeltaTwist, computeDeltaTwists, computeMetrics, plotMetrics, return_data
 
 import numpy as np
 from scipy.spatial.transform import Rotation

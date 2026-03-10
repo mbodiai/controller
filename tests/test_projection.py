@@ -1,4 +1,6 @@
-from control import Pose6D, Twist, project_pose
+from manifold.types.common.pose import Pose6D
+from manifold.types.common.twist import Twist
+from manifold.utils.geometry import project_pose
 
 import numpy as np
 from scipy.spatial.transform import Rotation

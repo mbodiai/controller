@@ -1,7 +1,6 @@
-from control import (
-    Pose6D, Twist,
-    integrate_position, integrate_rotation, rotvec_from_matrix,
-)
+from manifold.types.common.pose import Pose6D
+from manifold.types.common.twist import Twist
+from manifold.utils.geometry import integrate_position, integrate_rotation, rotvec_from_matrix
 
 import numpy as np
 from scipy.spatial.transform import Rotation
