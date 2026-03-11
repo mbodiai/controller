@@ -17,12 +17,12 @@ def computeSingleDeltaTwist(
     objPose: Pose6D,
     objTwist: Twist,
     params: TrajectoryControllerConfig,
-    velocity_bias: np.ndarray | None = None,
+    velocity_bias: Twist | None = None,
 ) -> Twist:
     """Compute a single velocity correction step (proportional + feedforward).
 
     Applies the control law:
-        linear_delta  = (v_obj + kp_position * (p_obj - p_ee)) + velocity_bias - v_ee
+        linear_delta  = (v_obj + kp_position * (p_obj - p_ee)) + velocity_bias.linear - v_ee
         angular_delta = (w_obj + kp_rotation * rotvec(R_ee^T @ R_obj)) - w_ee
 
     When params.linear_only is True, angular_delta is zero.
@@ -33,7 +33,7 @@ def computeSingleDeltaTwist(
         objPose: Object pose.
         objTwist: Object twist.
         params: Controller configuration (gains, flags).
-        velocity_bias: Optional additive bias on the desired linear velocity (3,).
+        velocity_bias: Optional additive twist bias on the desired velocity.
 
     Returns:
         Delta twist to apply to the end effector.
@@ -41,7 +41,7 @@ def computeSingleDeltaTwist(
     linear_error = objPose.position - eePose.position
     desired_lin_vel = objTwist.linear + linear_error * params.kp_position
     if velocity_bias is not None:
-        desired_lin_vel = desired_lin_vel + velocity_bias
+        desired_lin_vel = desired_lin_vel + velocity_bias.linear
     lin_delta = desired_lin_vel - eeTwist.linear
 
     if params.linear_only:
@@ -61,7 +61,7 @@ def computeDeltaTwists(
     objTwist: Twist,
     params: TrajectoryControllerConfig,
     max_linear_velocity: float = float("inf"),
-    velocity_bias: np.ndarray | None = None,
+    velocity_bias: Twist | None = None,
     max_steps: int | None = None,
 ) -> list[HandControl]:
     """Plan a multi-step trajectory using proportional + feedforward control.
@@ -78,7 +78,7 @@ def computeDeltaTwists(
         objTwist: Object twist (assumed constant).
         params: Controller configuration.
         max_linear_velocity: Speed clamp for EE linear velocity.
-        velocity_bias: Optional additive velocity bias applied at every step.
+        velocity_bias: Optional additive twist bias applied at every step.
         max_steps: Optional upper bound on trajectory length.
 
     Returns:

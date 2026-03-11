@@ -139,7 +139,7 @@ class TrajectoryController:
 
     def compute_drift_correction(
         self, measured_pose: Pose6D, total_consumed: int,
-    ) -> tuple[np.ndarray | None, np.ndarray]:
+    ) -> tuple[Twist | None, Twist]:
         """Compute velocity bias from consumed-position tracking error.
 
         Looks up the commanded position for the robot's current total_consumed
@@ -150,17 +150,21 @@ class TrajectoryController:
             Tuple of (velocity_bias, tracking_error). velocity_bias is None
             when there is insufficient history.
         """
-        tracking_error = np.zeros(3, dtype=np.float64)
+        zero = Twist.from_linear_angular(np.zeros(3), np.zeros(3))
         if not self._consumed_positions:
-            return None, tracking_error
+            return None, zero
         if total_consumed > self._last_seen_consumed:
             self._last_seen_consumed = total_consumed
         expected = self._lookup_consumed_position(total_consumed)
         if expected is None:
-            return None, tracking_error
+            return None, zero
         measured = np.array([measured_pose.x, measured_pose.y, measured_pose.z])
-        tracking_error = expected - measured
-        return self.config.kp_drift * tracking_error, tracking_error
+        error = expected - measured
+        bias = self.config.kp_drift * error
+        return (
+            Twist.from_linear_angular(bias, np.zeros(3)),
+            Twist.from_linear_angular(error, np.zeros(3)),
+        )
 
     def get_start_state(
         self, measured_pose: Pose6D, measured_twist: Twist,
@@ -212,7 +216,7 @@ class TrajectoryController:
         obj_pose: Pose6D,
         obj_twist: Twist,
         now: float,
-        velocity_bias: np.ndarray | None = None,
+        velocity_bias: Twist | None = None,
         max_steps: int | None = None,
     ) -> list[HandControl]:
         """ Plan a trajectory of timestamped EE waypoints to track an object
