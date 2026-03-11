@@ -4,6 +4,7 @@ from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
+from manifold.types.common.list import List
 from manifold.utils.geometry import (
     rotvec_from_matrix,
     integrate_position,
@@ -63,7 +64,7 @@ def computeDeltaTwists(
     max_linear_velocity: float = float("inf"),
     velocity_bias: Twist | None = None,
     max_steps: int | None = None,
-) -> list[HandControl]:
+) -> List[HandControl]:
     """Plan a multi-step trajectory using proportional + feedforward control.
 
     At each step: compute delta twist, update EE velocity (clamped to
@@ -96,11 +97,11 @@ def computeDeltaTwists(
     obj_pose = objPose
     obj_twist = objTwist
 
-    steps: list[HandControl] = [HandControl(
+    steps: List[HandControl] = List[HandControl]([HandControl(
         pose=ee_pose,
         twist=ee_twist,
         time=0.0,
-    )]
+    )])
 
     for step in range(1, nSteps):
         delta = computeSingleDeltaTwist(
@@ -144,7 +145,7 @@ def computeDeltaTwists(
 
 
 def interpolate_plan(
-    plan: list[HandControl], elapsed: float,
+    plan: List[HandControl], elapsed: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Linearly interpolate pose/twist from a plan at a given elapsed time.
 
