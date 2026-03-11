@@ -80,8 +80,9 @@ def interpolate_plan(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Linearly interpolate pose/twist from a plan at a given elapsed time.
 
-    Used by compute_blended_start to predict where the robot should be
-    based on the last plan. Clamps to first/last step if elapsed is out of range.
+    Uses np.searchsorted for O(log n) interval lookup. Packs state into a
+    single 12-element array for one vectorized lerp. Clamps to first/last
+    step if elapsed is out of range.
 
     Returns:
         Tuple of (position, linear_vel, rotation_rpy, angular_vel).
