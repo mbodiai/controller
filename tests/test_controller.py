@@ -1,6 +1,6 @@
 from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
-from manifold.types.act.trajectory import TrajectoryControllerConfig
+from manifold.types.act.controller_config import TrajectoryControllerConfig
 from control import computeSingleDeltaTwist, computeDeltaTwists, computeMetrics, plotMetrics
 
 import numpy as np

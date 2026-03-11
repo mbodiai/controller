@@ -5,11 +5,7 @@ import numpy as np
 
 from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
-from manifold.types.act.trajectory import (
-    TrajectoryControllerConfig,
-    TrajectoryStep,
-    Trajectory,
-)
+from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
 from manifold.utils.geometry import (
     rotvec_from_matrix,
@@ -91,7 +87,7 @@ def computeDeltaTwists(
     max_linear_velocity: float = float("inf"),
     velocity_bias: np.ndarray | None = None,
     max_steps: int | None = None,
-) -> Trajectory:
+) -> list[HandControl]:
     """Plan a multi-step trajectory using proportional + feedforward control.
 
     At each step: compute delta twist, update EE velocity (clamped to
@@ -109,7 +105,7 @@ def computeDeltaTwists(
         max_steps: Optional upper bound on trajectory length.
 
     Returns:
-        Trajectory with step 0 = initial state and subsequent planned steps.
+        List of HandControl waypoints; index 0 = initial state, rest = planned steps.
     """
     raise NotImplementedError
 
@@ -125,7 +121,7 @@ class TrajectoryController:
 
     config: TrajectoryControllerConfig
     max_linear_velocity: float = 0.5
-    _last_plan: Trajectory | None = field(default=None, init=False)
+    _last_plan: list[HandControl] | None = field(default=None, init=False)
     _last_plan_time: float | None = field(default=None, init=False)
     _last_pushed_index: int = field(default=0, init=False)
     last_blend_elapsed: float = field(default=0.0, init=False)
@@ -172,7 +168,7 @@ class TrajectoryController:
         raise NotImplementedError
 
     def record_push_result(
-        self, trajectory: Trajectory, pushed_count: int,
+        self, trajectory: list[HandControl], pushed_count: int,
         depth_before: int, total_consumed: int,
     ) -> None:
         """Record pushed waypoints for consumed-position drift tracking.
@@ -246,51 +242,30 @@ class TrajectoryController:
         now: float,
         velocity_bias: np.ndarray | None = None,
         max_steps: int | None = None,
-    ) -> Trajectory:
-        """Plan a trajectory from the given start state.
+    ) -> list[HandControl]:
+        """ Plan a trajectory of timestamped EE waypoints to track an object
 
-        Delegates to computeDeltaTwists and stores the result as _last_plan
-        for subsequent drift correction via compute_blended_start.
+        Delegates to computeDeltaTwists. Also stores the result internally
+        for compute_blended_start (starvation recovery fallback; not used
+        during normal operation where last-pushed state provides continuity).
 
         Args:
             ee_pose: Planning start pose (from get_start_state).
             ee_twist: Planning start twist.
             obj_pose: Object pose (typically forward-projected).
             obj_twist: Object twist.
-            now: Current wall-clock time (stored for plan interpolation).
+            now: Current wall-clock time.
             velocity_bias: Optional drift correction bias.
             max_steps: Optional cap on trajectory length.
 
         Returns:
-            Planned trajectory.
-        """
-        raise NotImplementedError
-
-    def trajectory_to_hand_controls(
-        self,
-        trajectory: Trajectory,
-        current_orientation: tuple[float, float, float],
-        grasp: float = 0.0,
-    ) -> list[HandControl]:
-        """Convert trajectory steps to HandControls for the robot streaming buffer.
-
-        Uses config.speed_mode to choose between speed-based (HandControl.speed)
-        and time-based (HandControl.time) waypoints. Orientation is held constant
-        at current_orientation for all waypoints.
-
-        Args:
-            trajectory: Planned trajectory (steps[1:] are converted).
-            current_orientation: (roll, pitch, yaw) to hold for all waypoints.
-            grasp: Gripper value for all waypoints.
-
-        Returns:
-            List of HandControl waypoints.
+            Planned trajectory as a list of HandControl waypoints.
         """
         raise NotImplementedError
 
 
 def _interpolate_plan(
-    plan: Trajectory, elapsed: float,
+    plan: list[HandControl], elapsed: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Linearly interpolate pose/twist from a trajectory at a given elapsed time.
 
