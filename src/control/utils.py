@@ -149,38 +149,31 @@ def interpolate_plan(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Linearly interpolate pose/twist from a plan at a given elapsed time.
 
-    Used by compute_blended_start to predict where the robot should be
-    based on the last plan. Clamps to first/last step if elapsed is out of range.
+    Uses np.searchsorted for O(log n) interval lookup. Packs state into a
+    single 12-element array for one vectorized lerp. Clamps to first/last
+    step if elapsed is out of range.
 
     Returns:
         Tuple of (position, linear_vel, rotation_rpy, angular_vel).
     """
-    steps = plan
+    n = len(plan)
+    times = np.array([s.time for s in plan], dtype=np.float64)
 
-    def _extract(s: HandControl) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        return (
-            np.asarray(s.pose.position, dtype=np.float64),
-            np.asarray(s.twist.linear, dtype=np.float64),
-            np.array([s.pose.roll, s.pose.pitch, s.pose.yaw], dtype=np.float64),
-            np.asarray(s.twist.angular, dtype=np.float64),
-        )
+    idx = int(np.clip(np.searchsorted(times, elapsed, side="right") - 1, 0, n - 2))
 
-    if elapsed <= steps[0].time:
-        return _extract(steps[0])
-    if elapsed >= steps[-1].time:
-        return _extract(steps[-1])
+    t0, t1 = times[idx], times[idx + 1]
+    alpha = np.clip((elapsed - t0) / (t1 - t0) if t1 > t0 else 0.0, 0.0, 1.0)
 
-    for i in range(len(steps) - 1):
-        t0, t1 = steps[i].time, steps[i + 1].time
-        if t0 <= elapsed <= t1:
-            alpha = (elapsed - t0) / (t1 - t0) if t1 > t0 else 0.0
-            p0, lv0, r0, av0 = _extract(steps[i])
-            p1, lv1, r1, av1 = _extract(steps[i + 1])
-            return (
-                p0 + alpha * (p1 - p0),
-                lv0 + alpha * (lv1 - lv0),
-                r0 + alpha * (r1 - r0),
-                av0 + alpha * (av1 - av0),
-            )
+    def _pack(s: HandControl) -> np.ndarray:
+        return np.array([
+            s.pose.x, s.pose.y, s.pose.z,
+            s.twist.vx, s.twist.vy, s.twist.vz,
+            s.pose.roll, s.pose.pitch, s.pose.yaw,
+            s.twist.wx, s.twist.wy, s.twist.wz,
+        ], dtype=np.float64)
 
-    return _extract(steps[-1])
+    v0 = _pack(plan[idx])
+    v1 = _pack(plan[idx + 1])
+    v = v0 + alpha * (v1 - v0)
+
+    return v[0:3], v[3:6], v[6:9], v[9:12]
