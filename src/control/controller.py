@@ -71,7 +71,7 @@ class TrajectoryController:
 
     def compute_drift_correction(
         self, measured_pose: Pose6D, total_consumed: int,
-    ) -> tuple[np.ndarray | None, np.ndarray]:
+    ) -> tuple[Twist | None, Twist]:
         """Compute velocity bias from consumed-position tracking error.
 
         Looks up the commanded position for the robot's current total_consumed
@@ -79,8 +79,8 @@ class TrajectoryController:
         velocity_bias.
 
         Returns:
-            Tuple of (velocity_bias, tracking_error). velocity_bias is None
-            when there is insufficient history.
+            Tuple of (velocity_bias, tracking_error) as Twist objects.
+            velocity_bias is None when there is insufficient history.
         """
         raise NotImplementedError
 
@@ -120,7 +120,7 @@ class TrajectoryController:
         obj_pose: Pose6D,
         obj_twist: Twist,
         now: float,
-        velocity_bias: np.ndarray | None = None,
+        velocity_bias: Twist | None = None,
         max_steps: int | None = None,
     ) -> list[HandControl]:
         """Plan a trajectory of timestamped EE waypoints to track an object.
