@@ -1,28 +1,28 @@
+import numpy as np
+import pytest
+from scipy.spatial.transform import Rotation
+
 from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
-from control import computeSingleDeltaTwist, computeDeltaTwists, computeMetrics, plotMetrics
-
-import numpy as np
-from scipy.spatial.transform import Rotation
-
-import pytest
+from manifold.types.act.control import HandControl
+from control.controller import TrajectoryController
 
 
-class TestController:
+class TestTrajectoryController:
 
-    def testConvergenceToStationaryTarget(self):
-        """EE should converge toward a stationary object, reducing position error over the trajectory."""
+    def test_stationary_target_convergence(self):
+        """Position error should decrease when tracking a stationary target."""
         pytest.skip("stub")
 
-    def testRotationalConvergence(self):
-        """EE rotation should converge toward the object's rotation (90 deg yaw offset)."""
+    def test_constant_velocity_tracking(self):
+        """EE should follow a moving target — error should stabilize, not diverge."""
         pytest.skip("stub")
 
-    def testPositionAndRotationConvergence(self):
-        """Both position and rotation error should decrease when tracking a static target with offset in all DOF."""
+    def test_rotation_convergence(self):
+        """Rotation error should decrease when tracking a rotated stationary target."""
         pytest.skip("stub")
 
-    def testTrackingConstantVelocity(self):
-        """EE velocity should converge to match a constant-velocity object, with bounded position and rotation error."""
+    def test_drift_correction_reduces_error(self):
+        """With systematic bias in measurements, drift correction should help."""
         pytest.skip("stub")
