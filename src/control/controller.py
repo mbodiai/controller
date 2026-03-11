@@ -7,112 +7,8 @@ from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
-from manifold.utils.geometry import (
-    rotvec_from_matrix,
-    integrate_position,
-    integrate_rotation,
-)
+from control.utils import computeDeltaTwists, interpolate_plan
 
-
-def _project_state(
-    pos: np.ndarray,
-    rot: np.ndarray,
-    lin_vel: np.ndarray,
-    ang_vel: np.ndarray,
-    horizon: float,
-    dt: float,
-    linear_only: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Forward-project position and rotation by integrating constant velocity.
-
-    Performs n = max(1, int(horizon / dt)) Euler integration steps.
-    Position is updated via integrate_position; rotation via integrate_rotation
-    (skipped when linear_only is True).
-
-    Args:
-        pos: Starting position (3,).
-        rot: Starting rotation matrix (3, 3).
-        lin_vel: Linear velocity (3,).
-        ang_vel: Angular velocity (3,).
-        horizon: Total time to integrate over (seconds).
-        dt: Integration timestep (seconds).
-        linear_only: If True, skip rotation integration.
-
-    Returns:
-        Tuple of (projected_position, projected_rotation).
-    """
-    raise NotImplementedError
-
-
-# ────────────────────────────────────────────────────────────────
-# Public API (accepts / returns manifold types)
-# ────────────────────────────────────────────────────────────────
-
-def computeSingleDeltaTwist(
-    eePose: Pose6D,
-    eeTwist: Twist,
-    objPose: Pose6D,
-    objTwist: Twist,
-    params: TrajectoryControllerConfig,
-    velocity_bias: np.ndarray | None = None,
-) -> Twist:
-    """Compute a single velocity correction step (proportional + feedforward).
-
-    Applies the control law:
-        linear_delta  = (v_obj + kp_position * (p_obj - p_ee)) + velocity_bias - v_ee
-        angular_delta = (w_obj + kp_rotation * rotvec(R_ee^T @ R_obj)) - w_ee
-
-    When params.linear_only is True, angular_delta is zero.
-
-    Args:
-        eePose: End effector pose.
-        eeTwist: End effector twist.
-        objPose: Object pose.
-        objTwist: Object twist.
-        params: Controller configuration (gains, flags).
-        velocity_bias: Optional additive bias on the desired linear velocity (3,).
-
-    Returns:
-        Delta twist to apply to the end effector.
-    """
-    raise NotImplementedError
-
-
-def computeDeltaTwists(
-    eePose: Pose6D,
-    eeTwist: Twist,
-    objPose: Pose6D,
-    objTwist: Twist,
-    params: TrajectoryControllerConfig,
-    max_linear_velocity: float = float("inf"),
-    velocity_bias: np.ndarray | None = None,
-    max_steps: int | None = None,
-) -> list[HandControl]:
-    """Plan a multi-step trajectory using proportional + feedforward control.
-
-    At each step: compute delta twist, update EE velocity (clamped to
-    max_linear_velocity), integrate both EE and object states forward by dt.
-    Number of steps is max(3, int(latency / dt) + 1), optionally capped by max_steps.
-
-    Args:
-        eePose: Initial end effector pose.
-        eeTwist: Initial end effector twist.
-        objPose: Initial object pose.
-        objTwist: Object twist (assumed constant).
-        params: Controller configuration.
-        max_linear_velocity: Speed clamp for EE linear velocity.
-        velocity_bias: Optional additive velocity bias applied at every step.
-        max_steps: Optional upper bound on trajectory length.
-
-    Returns:
-        List of HandControl waypoints; index 0 = initial state, rest = planned steps.
-    """
-    raise NotImplementedError
-
-
-# ────────────────────────────────────────────────────────────────
-# Stateful controller (drift correction + planning)
-# ────────────────────────────────────────────────────────────────
 
 @dataclass
 class TrajectoryController:
@@ -148,22 +44,6 @@ class TrajectoryController:
         Uses drift_alpha (position blend) and drift_beta (velocity blend from
         position error / dt) from config. Note: rotation blending uses RPY
         subtraction, which has gimbal lock issues near pitch=±90°.
-        """
-        raise NotImplementedError
-
-    def project_object(self, obj_pose: Pose6D, obj_twist: Twist, buffer_depth: int) -> Pose6D:
-        """Forward-project object pose to compensate for buffer delay.
-
-        Computes delay = buffer_depth * dt and advances position by twist * delay.
-        Rotation is left unchanged (linear-only projection).
-
-        Args:
-            obj_pose: Current object pose.
-            obj_twist: Current object twist.
-            buffer_depth: Number of waypoints currently queued in the robot buffer.
-
-        Returns:
-            Projected object pose.
         """
         raise NotImplementedError
 
@@ -243,7 +123,7 @@ class TrajectoryController:
         velocity_bias: np.ndarray | None = None,
         max_steps: int | None = None,
     ) -> list[HandControl]:
-        """ Plan a trajectory of timestamped EE waypoints to track an object
+        """Plan a trajectory of timestamped EE waypoints to track an object.
 
         Delegates to computeDeltaTwists. Also stores the result internally
         for compute_blended_start (starvation recovery fallback; not used
@@ -262,17 +142,3 @@ class TrajectoryController:
             Planned trajectory as a list of HandControl waypoints.
         """
         raise NotImplementedError
-
-
-def _interpolate_plan(
-    plan: list[HandControl], elapsed: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Linearly interpolate pose/twist from a trajectory at a given elapsed time.
-
-    Used by compute_blended_start to predict where the robot should be
-    based on the last plan. Clamps to first/last step if elapsed is out of range.
-
-    Returns:
-        Tuple of (position, linear_vel, rotation_rpy, angular_vel).
-    """
-    raise NotImplementedError
