@@ -213,7 +213,7 @@ class TestController:
         config = TrajectoryControllerConfig(
             kp_position=2.0,
             kp_rotation=1.0,
-            latency=0.0,
+            latency=5.0,
             simulation_horizon=5.0,
             dt=dt,
         )
