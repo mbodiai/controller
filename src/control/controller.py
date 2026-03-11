@@ -7,6 +7,7 @@ from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
+from manifold.types.common.list import List
 from control.utils import computeDeltaTwists, interpolate_plan
 
 
@@ -17,7 +18,7 @@ class TrajectoryController:
 
     config: TrajectoryControllerConfig
     max_linear_velocity: float = 0.5
-    _last_plan: list[HandControl] | None = field(default=None, init=False)
+    _last_plan: List[HandControl] | None = field(default=None, init=False)
     _last_plan_time: float | None = field(default=None, init=False)
     _last_pushed_index: int = field(default=0, init=False)
     last_blend_elapsed: float = field(default=0.0, init=False)
@@ -48,7 +49,7 @@ class TrajectoryController:
         raise NotImplementedError
 
     def record_push_result(
-        self, trajectory: list[HandControl], pushed_count: int,
+        self, trajectory: List[HandControl], pushed_count: int,
         depth_before: int, total_consumed: int,
     ) -> None:
         """Record pushed waypoints for consumed-position drift tracking.
@@ -122,7 +123,7 @@ class TrajectoryController:
         now: float,
         velocity_bias: Twist | None = None,
         max_steps: int | None = None,
-    ) -> list[HandControl]:
+    ) -> List[HandControl]:
         """Plan a trajectory of timestamped EE waypoints to track an object.
 
         Delegates to computeDeltaTwists. Also stores the result internally
