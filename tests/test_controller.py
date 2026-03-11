@@ -8,6 +8,7 @@ from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
 from control.controller import TrajectoryController
 
+EPS = 1e-10
 
 def _make_config(**overrides) -> TrajectoryControllerConfig:
     defaults = dict(kp_position=2.0, kp_rotation=1.0, latency=5.0, simulation_horizon=5.0, dt=0.1)
@@ -23,7 +24,6 @@ def _zero_twist() -> Twist:
     return Twist.from_linear_angular(np.zeros(3), np.zeros(3))
 
 
-EPS = 1e-10
 
 
 class TestTrajectoryController:
