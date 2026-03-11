@@ -5,11 +5,7 @@ import numpy as np
 
 from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
-from manifold.types.act.trajectory import (
-    TrajectoryControllerConfig,
-    TrajectoryStep,
-    Trajectory,
-)
+from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
 from manifold.utils.geometry import (
     rotvec_from_matrix,
@@ -109,7 +105,7 @@ def computeDeltaTwists(
     max_linear_velocity: float = float("inf"),
     velocity_bias: np.ndarray | None = None,
     max_steps: int | None = None,
-) -> Trajectory:
+) -> list[HandControl]:
     """Plan a multi-step trajectory using proportional + feedforward control.
 
     At each step: compute delta twist, update EE velocity (clamped to
@@ -127,7 +123,7 @@ def computeDeltaTwists(
         max_steps: Optional upper bound on trajectory length.
 
     Returns:
-        Trajectory with step 0 = initial state and subsequent planned steps.
+        List of HandControl waypoints; index 0 = initial state, rest = planned steps.
     """
     dt = params.dt
     linear_only = params.linear_only
@@ -140,13 +136,10 @@ def computeDeltaTwists(
     obj_pose = objPose
     obj_twist = objTwist
 
-    steps: list[TrajectoryStep] = [TrajectoryStep(
+    steps: list[HandControl] = [HandControl(
+        pose=ee_pose,
+        twist=ee_twist,
         time=0.0,
-        ee_pose=ee_pose,
-        ee_twist=ee_twist,
-        object_pose=obj_pose,
-        object_twist=obj_twist,
-        delta_twist=Twist.zero(),
     )]
 
     for step in range(1, nSteps):
@@ -178,16 +171,13 @@ def computeDeltaTwists(
         ee_twist = Twist.from_linear_angular(ee_lin, ee_ang)
         obj_pose = Pose6D.from_position_and_rotation_matrix(obj_pos, obj_rot)
 
-        steps.append(TrajectoryStep(
+        steps.append(HandControl(
+            pose=ee_pose,
+            twist=ee_twist,
             time=float(step) * dt,
-            ee_pose=ee_pose,
-            ee_twist=ee_twist,
-            object_pose=obj_pose,
-            object_twist=obj_twist,
-            delta_twist=delta,
         ))
 
-    return Trajectory(steps=steps)
+    return steps
 
 
 # ────────────────────────────────────────────────────────────────
@@ -201,7 +191,7 @@ class TrajectoryController:
 
     config: TrajectoryControllerConfig
     max_linear_velocity: float = 0.5
-    _last_plan: Trajectory | None = field(default=None, init=False)
+    _last_plan: list[HandControl] | None = field(default=None, init=False)
     _last_plan_time: float | None = field(default=None, init=False)
     _last_pushed_index: int = field(default=0, init=False)
     last_blend_elapsed: float = field(default=0.0, init=False)
@@ -234,7 +224,7 @@ class TrajectoryController:
         if (
             self._last_plan is None
             or self._last_plan_time is None
-            or not self._last_plan.steps
+            or not self._last_plan
         ):
             return measured_pose, measured_twist
 
@@ -248,13 +238,13 @@ class TrajectoryController:
         measured_lv = np.asarray(measured_twist.linear, dtype=np.float64)
         measured_av = np.asarray(measured_twist.angular, dtype=np.float64)
 
-        tail = self._last_plan.steps[
-            min(self._last_pushed_index, len(self._last_plan.steps) - 1)
+        tail = self._last_plan[
+            min(self._last_pushed_index, len(self._last_plan) - 1)
         ]
-        tail_pos = np.asarray(tail.ee_pose.position, dtype=np.float64)
-        tail_lv = np.asarray(tail.ee_twist.linear, dtype=np.float64)
-        tail_rpy = np.array([tail.ee_pose.roll, tail.ee_pose.pitch, tail.ee_pose.yaw], dtype=np.float64)
-        tail_av = np.asarray(tail.ee_twist.angular, dtype=np.float64)
+        tail_pos = np.asarray(tail.pose.position, dtype=np.float64)
+        tail_lv = np.asarray(tail.twist.linear, dtype=np.float64)
+        tail_rpy = np.array([tail.pose.roll, tail.pose.pitch, tail.pose.yaw], dtype=np.float64)
+        tail_av = np.asarray(tail.twist.angular, dtype=np.float64)
 
         pos_drift = measured_pos - pred_pos
         rot_drift = measured_rpy - pred_rpy
@@ -314,7 +304,7 @@ class TrajectoryController:
         )
 
     def record_push_result(
-        self, trajectory: Trajectory, pushed_count: int,
+        self, trajectory: list[HandControl], pushed_count: int,
         depth_before: int, total_consumed: int,
     ) -> None:
         """Record pushed waypoints for consumed-position drift tracking.
@@ -330,12 +320,12 @@ class TrajectoryController:
             total_consumed: Robot's total_consumed counter at time of push.
         """
         if pushed_count > 0:
-            last_step = trajectory.steps[min(pushed_count, len(trajectory.steps) - 1)]
-            self._last_pushed_pose = last_step.ee_pose
-            self._last_pushed_twist = last_step.ee_twist
+            last_step = trajectory[min(pushed_count, len(trajectory) - 1)]
+            self._last_pushed_pose = last_step.pose
+            self._last_pushed_twist = last_step.twist
         for i in range(pushed_count):
-            step = trajectory.steps[i + 1]
-            pos = np.array([step.ee_pose.x, step.ee_pose.y, step.ee_pose.z])
+            step = trajectory[i + 1]
+            pos = np.array([step.pose.x, step.pose.y, step.pose.z])
             self._consumed_positions.append((total_consumed + depth_before + i + 1, pos))
 
     def clear_last_pushed(self) -> None:
@@ -420,7 +410,7 @@ class TrajectoryController:
         now: float,
         velocity_bias: np.ndarray | None = None,
         max_steps: int | None = None,
-    ) -> Trajectory:
+    ) -> list[HandControl]:
         """ Plan a trajectory of timestamped EE waypoints to track an object
 
         Delegates to computeDeltaTwists. Also stores the result internally
@@ -451,43 +441,9 @@ class TrajectoryController:
 
         return trajectory
 
-    def trajectory_to_hand_controls(
-        self,
-        trajectory: Trajectory,
-        current_orientation: tuple[float, float, float],
-        grasp: float = 0.0,
-    ) -> list[HandControl]:
-        """Convert trajectory steps to HandControls for the robot streaming buffer.
-
-        Uses config.speed_mode to choose between speed-based (HandControl.speed)
-        and time-based (HandControl.time) waypoints. Orientation is held constant
-        at current_orientation for all waypoints.
-
-        Args:
-            trajectory: Planned trajectory (steps[1:] are converted).
-            current_orientation: (roll, pitch, yaw) to hold for all waypoints.
-            grasp: Gripper value for all waypoints.
-
-        Returns:
-            List of HandControl waypoints.
-        """
-        roll, pitch, yaw = current_orientation
-        results = []
-
-        for i, step in enumerate(trajectory.steps[1:], start=1):
-            pose = Pose6D(x=step.ee_pose.x, y=step.ee_pose.y, z=step.ee_pose.z, roll=roll, pitch=pitch, yaw=yaw)
-            if self.config.speed_mode:
-                linear_speed = float(np.linalg.norm([step.ee_twist.vx, step.ee_twist.vy, step.ee_twist.vz]))
-                results.append(HandControl(pose=pose, grasp=grasp, speed=max(linear_speed, 0.05)))
-            else:
-                dt = step.time - trajectory.steps[i - 1].time if i > 0 else step.time
-                results.append(HandControl(pose=pose, grasp=grasp, time=dt))
-
-        return results
-
 
 def _interpolate_plan(
-    plan: Trajectory, elapsed: float,
+    plan: list[HandControl], elapsed: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Linearly interpolate pose/twist from a trajectory at a given elapsed time.
 
@@ -497,14 +453,14 @@ def _interpolate_plan(
     Returns:
         Tuple of (position, linear_vel, rotation_rpy, angular_vel).
     """
-    steps = plan.steps
+    steps = plan
 
-    def _extract(s: TrajectoryStep) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _extract(s: HandControl) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         return (
-            np.asarray(s.ee_pose.position, dtype=np.float64),
-            np.asarray(s.ee_twist.linear, dtype=np.float64),
-            np.array([s.ee_pose.roll, s.ee_pose.pitch, s.ee_pose.yaw], dtype=np.float64),
-            np.asarray(s.ee_twist.angular, dtype=np.float64),
+            np.asarray(s.pose.position, dtype=np.float64),
+            np.asarray(s.twist.linear, dtype=np.float64),
+            np.array([s.pose.roll, s.pose.pitch, s.pose.yaw], dtype=np.float64),
+            np.asarray(s.twist.angular, dtype=np.float64),
         )
 
     if elapsed <= steps[0].time:

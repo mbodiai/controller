@@ -1,7 +1,7 @@
 from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
-from manifold.types.act.trajectory import TrajectoryControllerConfig
-from control import computeSingleDeltaTwist, computeDeltaTwists, computeMetrics, plotMetrics
+from manifold.types.act.controller_config import TrajectoryControllerConfig
+from control import computeSingleDeltaTwist, computeDeltaTwists
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -48,18 +48,15 @@ class TestController:
         )
 
         final_error = np.linalg.norm(
-            np.asarray(traj.steps[-1].ee_pose.position)
-            - np.asarray(traj.steps[-1].object_pose.position)
+            np.asarray(traj[-1].pose.position)
+            - np.asarray(obj_pose.position)
         )
 
-        ee_positions = np.array([np.asarray(s.ee_pose.position) for s in traj.steps])
+        ee_positions = np.array([np.asarray(s.pose.position) for s in traj])
 
         print("\n")
         for index, element in enumerate(ee_positions):
             print("dt: {:.2f}    {}".format(dt * index, element))
-
-        metrics = computeMetrics(traj, obj_pose, 0.5)
-        plotMetrics(traj, obj_pose, metrics)
 
         assert final_error < initial_error, (
             "Controller should reduce error initial error{} final error{}".format(
@@ -111,7 +108,7 @@ class TestController:
         initial_rot_vec = Rotation.from_matrix(initial_rot_error).as_rotvec()
         initial_rot_error_mag = np.linalg.norm(initial_rot_vec)
 
-        final_ee_rotation = np.asarray(traj.steps[-1].ee_pose.rotation_matrix)
+        final_ee_rotation = np.asarray(traj[-1].pose.rotation_matrix)
         final_rot_error = np.matmul(
             final_ee_rotation.T, np.asarray(obj_pose.rotation_matrix),
         )
@@ -120,9 +117,6 @@ class TestController:
 
         print(f"\nInitial rotational error: {initial_rot_error_mag:.4f} rad ({np.degrees(initial_rot_error_mag):.2f} deg)")
         print(f"Final rotational error: {final_rot_error_mag:.4f} rad ({np.degrees(final_rot_error_mag):.2f} deg)")
-
-        metrics = computeMetrics(traj, obj_pose, 0.5)
-        plotMetrics(traj, obj_pose, metrics)
 
     def testPositionAndRotationConvergence(self):
         """Both position and rotation error should decrease when tracking a static target with offset in all DOF."""
@@ -164,8 +158,8 @@ class TestController:
             np.asarray(ee_pose.position) - np.asarray(obj_pose.position)
         )
         final_pos_error = np.linalg.norm(
-            np.asarray(traj.steps[-1].ee_pose.position)
-            - np.asarray(traj.steps[-1].object_pose.position)
+            np.asarray(traj[-1].pose.position)
+            - np.asarray(obj_pose.position)
         )
 
         initial_rot_error = Rotation.from_matrix(
@@ -178,7 +172,7 @@ class TestController:
 
         final_rot_error = Rotation.from_matrix(
             np.matmul(
-                np.asarray(traj.steps[-1].ee_pose.rotation_matrix).T,
+                np.asarray(traj[-1].pose.rotation_matrix).T,
                 np.asarray(obj_pose.rotation_matrix),
             )
         ).as_rotvec()
@@ -186,9 +180,6 @@ class TestController:
 
         print(f"\nPosition error: {initial_pos_error:.4f} -> {final_pos_error:.4f} m")
         print(f"Rotation error: {initial_rot_error_mag:.4f} -> {final_rot_error_mag:.4f} rad ({np.degrees(initial_rot_error_mag):.2f} -> {np.degrees(final_rot_error_mag):.2f} deg)")
-
-        metrics = computeMetrics(traj, obj_pose, 0.5)
-        plotMetrics(traj, obj_pose, metrics)
 
         assert final_pos_error < initial_pos_error
         assert final_rot_error_mag < initial_rot_error_mag
@@ -229,19 +220,19 @@ class TestController:
 
         traj = computeDeltaTwists(ee_pose, ee_twist, obj_pose, obj_twist, config)
 
-        final_step = traj.steps[-1]
-        final_ee_position = np.asarray(final_step.ee_pose.position)
-        final_obj_position = np.asarray(final_step.object_pose.position)
-        final_pos_error = np.linalg.norm(final_obj_position - final_ee_position)
+        final_step = traj[-1]
+        final_ee_position = np.asarray(final_step.pose.position)
+        final_pos_error = np.linalg.norm(
+            np.asarray(obj_pose.position) - final_ee_position
+        )
 
-        final_ee_velocity = np.asarray(final_step.ee_twist.linear)
+        final_ee_velocity = np.asarray(final_step.twist.linear)
         target_velocity = np.asarray(obj_twist.linear)
 
         velocity_error = np.linalg.norm(final_ee_velocity - target_velocity)
 
-        final_ee_rotation = np.asarray(final_step.ee_pose.rotation_matrix)
-        final_obj_rotation = np.asarray(final_step.object_pose.rotation_matrix)
-        rot_error = np.matmul(final_ee_rotation.T, final_obj_rotation)
+        final_ee_rotation = np.asarray(final_step.pose.rotation_matrix)
+        rot_error = np.matmul(final_ee_rotation.T, np.asarray(obj_pose.rotation_matrix))
         rot_error_vec = Rotation.from_matrix(rot_error).as_rotvec()
         final_rot_error_mag = np.linalg.norm(rot_error_vec)
 
@@ -251,8 +242,5 @@ class TestController:
 
         print(f"Final positional error: {final_pos_error:.4f} m")
         print(f"Final rotational error: {final_rot_error_mag:.4f} rad ({np.degrees(final_rot_error_mag):.2f} deg)")
-
-        metrics = computeMetrics(traj, obj_pose, 0.5)
-        plotMetrics(traj, obj_pose, metrics)
 
         assert velocity_error < 0.1, f"Velocity tracking error too large: {velocity_error:.4f} m/s"
