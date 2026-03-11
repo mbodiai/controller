@@ -4,7 +4,6 @@ from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
-from manifold.types.common.list import List
 from manifold.utils.geometry import (
     rotvec_from_matrix,
     integrate_position,
@@ -39,7 +38,7 @@ def computeSingleDeltaTwist(
     Returns:
         Delta twist to apply to the end effector.
     """
-    linear_error = objPose.position - eePose.position
+    linear_error = np.array([objPose.x, objPose.y, objPose.z]) - np.array([eePose.x, eePose.y, eePose.z])
     desired_lin_vel = objTwist.linear + linear_error * params.kp_position
     if velocity_bias is not None:
         desired_lin_vel = desired_lin_vel + velocity_bias.linear
@@ -64,7 +63,7 @@ def computeDeltaTwists(
     max_linear_velocity: float = float("inf"),
     velocity_bias: Twist | None = None,
     max_steps: int | None = None,
-) -> List[HandControl]:
+) -> list[HandControl]:
     """Plan a multi-step trajectory using proportional + feedforward control.
 
     At each step: compute delta twist, update EE velocity (clamped to
@@ -97,11 +96,11 @@ def computeDeltaTwists(
     obj_pose = objPose
     obj_twist = objTwist
 
-    steps: List[HandControl] = List[HandControl]([HandControl(
+    steps: list[HandControl] = [HandControl(
         pose=ee_pose,
         twist=ee_twist,
         time=0.0,
-    )])
+    )]
 
     for step in range(1, nSteps):
         delta = computeSingleDeltaTwist(
@@ -116,14 +115,14 @@ def computeDeltaTwists(
             ee_lin = ee_lin * (max_linear_velocity / speed)
 
         ee_pos = integrate_position(
-            np.asarray(ee_pose.position, dtype=np.float64), ee_lin, dt,
+            np.array([ee_pose.x, ee_pose.y, ee_pose.z], dtype=np.float64), ee_lin, dt,
         )
         ee_rot = integrate_rotation(
             np.asarray(ee_pose.rotation_matrix, dtype=np.float64), ee_ang, dt,
         ) if not linear_only else np.asarray(ee_pose.rotation_matrix, dtype=np.float64)
 
         obj_pos = integrate_position(
-            np.asarray(obj_pose.position, dtype=np.float64),
+            np.array([obj_pose.x, obj_pose.y, obj_pose.z], dtype=np.float64),
             np.asarray(obj_twist.linear, dtype=np.float64), dt,
         )
         obj_rot = integrate_rotation(
@@ -145,7 +144,7 @@ def computeDeltaTwists(
 
 
 def interpolate_plan(
-    plan: List[HandControl], elapsed: float,
+    plan: list[HandControl], elapsed: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Linearly interpolate pose/twist from a plan at a given elapsed time.
 
@@ -156,13 +155,7 @@ def interpolate_plan(
     Returns:
         Tuple of (position, linear_vel, rotation_rpy, angular_vel).
     """
-    n = len(plan)
-    times = np.array([s.time for s in plan], dtype=np.float64)
-
-    idx = int(np.clip(np.searchsorted(times, elapsed, side="right") - 1, 0, n - 2))
-
-    t0, t1 = times[idx], times[idx + 1]
-    alpha = np.clip((elapsed - t0) / (t1 - t0) if t1 > t0 else 0.0, 0.0, 1.0)
+    steps = plan
 
     def _pack(s: HandControl) -> np.ndarray:
         return np.array([
@@ -172,8 +165,18 @@ def interpolate_plan(
             s.twist.wx, s.twist.wy, s.twist.wz,
         ], dtype=np.float64)
 
-    v0 = _pack(plan[idx])
-    v1 = _pack(plan[idx + 1])
-    v = v0 + alpha * (v1 - v0)
+    def _unpack(v: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        return v[:3], v[3:6], v[6:9], v[9:12]
 
-    return v[0:3], v[3:6], v[6:9], v[9:12]
+    if elapsed <= steps[0].time:
+        return _unpack(_pack(steps[0]))
+    if elapsed >= steps[-1].time:
+        return _unpack(_pack(steps[-1]))
+
+    times = np.array([s.time for s in steps])
+    idx = int(np.clip(np.searchsorted(times, elapsed, side='right') - 1, 0, len(steps) - 2))
+    t0, t1 = times[idx], times[idx + 1]
+    alpha = (elapsed - t0) / (t1 - t0) if t1 > t0 else 0.0
+    v0 = _pack(steps[idx])
+    v1 = _pack(steps[idx + 1])
+    return _unpack(v0 + alpha * (v1 - v0))

@@ -7,7 +7,6 @@ from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
-from manifold.types.common.list import List
 from control.utils import computeDeltaTwists, interpolate_plan
 
 
@@ -18,7 +17,7 @@ class TrajectoryController:
 
     config: TrajectoryControllerConfig
     max_linear_velocity: float = 0.5
-    _last_plan: List[HandControl] | None = field(default=None, init=False)
+    _last_plan: list[HandControl] | None = field(default=None, init=False)
     _last_plan_time: float | None = field(default=None, init=False)
     _last_pushed_index: int = field(default=0, init=False)
     last_blend_elapsed: float = field(default=0.0, init=False)
@@ -60,7 +59,7 @@ class TrajectoryController:
 
         pred_pos, pred_lv, pred_rpy, pred_av = interpolate_plan(self._last_plan, elapsed)
 
-        measured_pos = np.asarray(measured_pose.position, dtype=np.float64)
+        measured_pos = np.array([measured_pose.x, measured_pose.y, measured_pose.z], dtype=np.float64)
         measured_rpy = np.array([measured_pose.roll, measured_pose.pitch, measured_pose.yaw], dtype=np.float64)
         measured_lv = np.asarray(measured_twist.linear, dtype=np.float64)
         measured_av = np.asarray(measured_twist.angular, dtype=np.float64)
@@ -68,7 +67,7 @@ class TrajectoryController:
         tail = self._last_plan[
             min(self._last_pushed_index, len(self._last_plan) - 1)
         ]
-        tail_pos = np.asarray(tail.pose.position, dtype=np.float64)
+        tail_pos = np.array([tail.pose.x, tail.pose.y, tail.pose.z], dtype=np.float64)
         tail_lv = np.asarray(tail.twist.linear, dtype=np.float64)
         tail_rpy = np.array([tail.pose.roll, tail.pose.pitch, tail.pose.yaw], dtype=np.float64)
         tail_av = np.asarray(tail.twist.angular, dtype=np.float64)
@@ -109,7 +108,7 @@ class TrajectoryController:
         return blended_pose, blended_twist
 
     def record_push_result(
-        self, trajectory: List[HandControl], pushed_count: int,
+        self, trajectory: list[HandControl], pushed_count: int,
         depth_before: int, total_consumed: int,
     ) -> None:
         """Record pushed waypoints for consumed-position drift tracking.
@@ -219,7 +218,7 @@ class TrajectoryController:
         now: float,
         velocity_bias: Twist | None = None,
         max_steps: int | None = None,
-    ) -> List[HandControl]:
+    ) -> list[HandControl]:
         """ Plan a trajectory of timestamped EE waypoints to track an object
 
         Delegates to computeDeltaTwists. Also stores the result internally
