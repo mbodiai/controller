@@ -99,7 +99,7 @@ def computeDeltaTwists(
     steps: list[HandControl] = [HandControl(
         pose=ee_pose,
         twist=ee_twist,
-        time=0.0,
+        duration=0.0,
     )]
 
     for step in range(1, nSteps):
@@ -137,7 +137,7 @@ def computeDeltaTwists(
         steps.append(HandControl(
             pose=ee_pose,
             twist=ee_twist,
-            time=float(step) * dt,
+            duration=dt,
         ))
 
     return steps
@@ -168,12 +168,13 @@ def interpolate_plan(
     def _unpack(v: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         return v[:3], v[3:6], v[6:9], v[9:12]
 
-    if elapsed <= steps[0].time:
+    times = np.cumsum([s.duration for s in steps])
+
+    if elapsed <= times[0]:
         return _unpack(_pack(steps[0]))
-    if elapsed >= steps[-1].time:
+    if elapsed >= times[-1]:
         return _unpack(_pack(steps[-1]))
 
-    times = np.array([s.time for s in steps])
     idx = int(np.clip(np.searchsorted(times, elapsed, side='right') - 1, 0, len(steps) - 2))
     t0, t1 = times[idx], times[idx + 1]
     alpha = (elapsed - t0) / (t1 - t0) if t1 > t0 else 0.0

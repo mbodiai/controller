@@ -22,7 +22,7 @@ def computeMetrics(t: list[HandControl], targetPose: Pose6D, slidingWindowTime: 
         positionErrors, rotationErrors.
     """
     steps = t
-    time = np.array([s.time for s in steps], dtype=np.float64)
+    time = np.cumsum([s.duration for s in steps], dtype=np.float64)
     eePositions = np.array([np.asarray(s.pose.position, dtype=np.float64) for s in steps])
     eeRotations = np.array([np.asarray(s.pose.rotation_matrix, dtype=np.float64) for s in steps])
 
