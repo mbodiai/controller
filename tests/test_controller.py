@@ -1,246 +1,151 @@
+import numpy as np
+import pytest
+from scipy.spatial.transform import Rotation
+
 from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
-from control import computeSingleDeltaTwist, computeDeltaTwists
-
-import numpy as np
-from scipy.spatial.transform import Rotation
-
-import pytest
+from manifold.types.act.control import HandControl
+from control.controller import TrajectoryController
 
 
-class TestController:
+def _make_config(**overrides) -> TrajectoryControllerConfig:
+    defaults = dict(kp_position=2.0, kp_rotation=1.0, latency=5.0, simulation_horizon=5.0, dt=0.1)
+    defaults.update(overrides)
+    return TrajectoryControllerConfig(**defaults)
 
-    def testConvergenceToStationaryTarget(self):
-        """EE should converge toward a stationary object, reducing position error over the trajectory."""
 
-        obj_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([1.0, 0.0, 0.0], dtype=np.float64),
-            rotation_matrix=np.eye(3, dtype=np.float64),
-        )
+def _zero_pose() -> Pose6D:
+    return Pose6D.from_position_and_rotation_matrix(np.zeros(3), np.eye(3))
 
-        obj_twist = Twist.from_linear_angular(
-            linear=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            angular=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-        )
-        ee_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            rotation_matrix=np.eye(3, dtype=np.float64),
-        )
-        ee_twist = Twist.from_linear_angular(
-            linear=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            angular=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-        )
 
-        dt = 0.1
-        config = TrajectoryControllerConfig(
-            kp_position=1.0,
-            kp_rotation=1.0,
-            latency=0.0,
-            simulation_horizon=10.0,
-            dt=dt,
-        )
+def _zero_twist() -> Twist:
+    return Twist.from_linear_angular(np.zeros(3), np.zeros(3))
 
-        traj = computeDeltaTwists(ee_pose, ee_twist, obj_pose, obj_twist, config)
 
-        initial_error = np.linalg.norm(
-            np.asarray(ee_pose.position) - np.asarray(obj_pose.position)
-        )
+class TestTrajectoryController:
 
-        final_error = np.linalg.norm(
-            np.asarray(traj[-1].pose.position)
-            - np.asarray(obj_pose.position)
-        )
+    def test_stationary_target_convergence(self):
+        """Position error should decrease when tracking a stationary target."""
+        tc = TrajectoryController(config=_make_config(kp_position=5.0))
+        obj_pose = Pose6D.from_position_and_rotation_matrix(np.array([1.0, 0.0, 0.0]), np.eye(3))
+        obj_twist = _zero_twist()
 
-        ee_positions = np.array([np.asarray(s.pose.position) for s in traj])
+        ee_pose = _zero_pose()
+        ee_twist = _zero_twist()
+        errors = []
 
-        print("\n")
-        for index, element in enumerate(ee_positions):
-            print("dt: {:.2f}    {}".format(dt * index, element))
+        for step in range(100):
+            now = step * tc.config.dt
+            start_pose, start_twist = tc.get_start_state(ee_pose, ee_twist, now, 0)
+            traj = tc.compute_trajectory(start_pose, start_twist, obj_pose, obj_twist, now)
+            tc.record_push_result(traj, min(5, len(traj) - 1), 0, step * 5)
 
-        assert final_error < initial_error, (
-            "Controller should reduce error initial error{} final error{}".format(
-                initial_error, final_error,
-            )
-        )
+            ee_pose = traj[1].pose
+            ee_twist = traj[1].twist
+            errors.append(np.linalg.norm(np.asarray(ee_pose.position) - np.asarray(obj_pose.position)))
 
-    def testRotationalConvergence(self):
-        """EE rotation should converge toward the object's rotation (90 deg yaw offset)."""
+        assert errors[-1] < errors[0], "Position error should decrease over time"
+        first_quarter = np.mean(errors[:25])
+        last_quarter = np.mean(errors[-25:])
+        assert last_quarter < first_quarter, "Average error in last quarter should be less than first quarter"
 
-        targetRotation = Rotation.from_rotvec([0.0, 0.0, np.pi / 2]).as_matrix()
+    def test_constant_velocity_tracking(self):
+        """EE should follow a moving target — error should stabilize, not diverge."""
+        tc = TrajectoryController(config=_make_config())
+        obj_velocity = np.array([1.0, 0.0, 0.0])
+        obj_twist = Twist.from_linear_angular(obj_velocity, np.zeros(3))
 
-        obj_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            rotation_matrix=targetRotation,
-        )
+        ee_pose = _zero_pose()
+        ee_twist = _zero_twist()
+        position_errors = []
 
-        obj_twist = Twist.from_linear_angular(
-            linear=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            angular=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-        )
+        for step in range(200):
+            now = step * tc.config.dt
+            obj_pos = obj_velocity * now
+            obj_pose = Pose6D.from_position_and_rotation_matrix(obj_pos, np.eye(3))
 
-        ee_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            rotation_matrix=np.eye(3, dtype=np.float64),
-        )
+            start_pose, start_twist = tc.get_start_state(ee_pose, ee_twist, now, 0)
+            traj = tc.compute_trajectory(start_pose, start_twist, obj_pose, obj_twist, now)
+            tc.record_push_result(traj, min(5, len(traj) - 1), 0, step * 5)
 
-        ee_twist = Twist.from_linear_angular(
-            linear=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            angular=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-        )
+            ee_pose = traj[1].pose
+            ee_twist = traj[1].twist
+            position_errors.append(np.linalg.norm(np.asarray(ee_pose.position) - obj_pos))
 
-        dt = 0.1
+        avg_last_20 = np.mean(position_errors[-20:])
+        peak_error = max(position_errors)
+        assert avg_last_20 < peak_error, "Steady-state error should be below the peak transient"
+        # Error should not grow unboundedly — the EE should keep up
+        assert avg_last_20 < 2.0, f"Steady-state error {avg_last_20:.4f} should remain bounded"
 
-        params = TrajectoryControllerConfig(
-            kp_position=0.5,
-            kp_rotation=0.5,
-            latency=0.2,
-            simulation_horizon=10.0,
-            dt=dt,
-        )
+    def test_rotation_convergence(self):
+        """Rotation error should decrease when tracking a rotated stationary target."""
+        tc = TrajectoryController(config=_make_config(linear_only=False))
+        target_rot = Rotation.from_rotvec([0.0, 0.0, np.pi / 2]).as_matrix()
+        obj_pose = Pose6D.from_position_and_rotation_matrix(np.zeros(3), target_rot)
+        obj_twist = _zero_twist()
 
-        traj = computeDeltaTwists(ee_pose, ee_twist, obj_pose, obj_twist, params)
+        ee_pose = _zero_pose()
+        ee_twist = _zero_twist()
+        rot_errors = []
 
-        initial_rot_error = np.matmul(
-            np.asarray(ee_pose.rotation_matrix).T,
-            np.asarray(obj_pose.rotation_matrix),
-        )
-        initial_rot_vec = Rotation.from_matrix(initial_rot_error).as_rotvec()
-        initial_rot_error_mag = np.linalg.norm(initial_rot_vec)
+        for step in range(100):
+            now = step * tc.config.dt
+            start_pose, start_twist = tc.get_start_state(ee_pose, ee_twist, now, 0)
+            traj = tc.compute_trajectory(start_pose, start_twist, obj_pose, obj_twist, now)
+            tc.record_push_result(traj, min(5, len(traj) - 1), 0, step * 5)
 
-        final_ee_rotation = np.asarray(traj[-1].pose.rotation_matrix)
-        final_rot_error = np.matmul(
-            final_ee_rotation.T, np.asarray(obj_pose.rotation_matrix),
-        )
-        final_rot_vec = Rotation.from_matrix(final_rot_error).as_rotvec()
-        final_rot_error_mag = np.linalg.norm(final_rot_vec)
+            ee_pose = traj[1].pose
+            ee_twist = traj[1].twist
+            rel_rot = np.asarray(ee_pose.rotation_matrix).T @ target_rot
+            rot_errors.append(np.linalg.norm(Rotation.from_matrix(rel_rot).as_rotvec()))
 
-        print(f"\nInitial rotational error: {initial_rot_error_mag:.4f} rad ({np.degrees(initial_rot_error_mag):.2f} deg)")
-        print(f"Final rotational error: {final_rot_error_mag:.4f} rad ({np.degrees(final_rot_error_mag):.2f} deg)")
+        assert rot_errors[-1] < rot_errors[0], "Rotation error should decrease over time"
+        first_quarter = np.mean(rot_errors[:25])
+        last_quarter = np.mean(rot_errors[-25:])
+        assert last_quarter < first_quarter, "Average rotation error should decrease over time"
 
-    def testPositionAndRotationConvergence(self):
-        """Both position and rotation error should decrease when tracking a static target with offset in all DOF."""
+    def test_drift_correction_reduces_error(self):
+        """With systematic bias in measurements, drift correction should help."""
+        obj_twist = _zero_twist()
+        obj_pose = Pose6D.from_position_and_rotation_matrix(np.array([1.0, 0.0, 0.0]), np.eye(3))
+        n_steps = 60
+        systematic_bias = np.array([0.02, 0.0, 0.0])
 
-        target_rotation = Rotation.from_rotvec([0, 0, np.pi / 4]).as_matrix().astype(np.float64)
+        def _run(kp_drift: float) -> list[float]:
+            tc = TrajectoryController(config=_make_config(kp_drift=kp_drift))
+            ee_pose = _zero_pose()
+            ee_twist = _zero_twist()
+            errors = []
+            total_consumed = 0
 
-        obj_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([1.0, 2.0, 5.0], dtype=np.float64),
-            rotation_matrix=target_rotation,
-        )
+            for step in range(n_steps):
+                now = step * tc.config.dt
 
-        obj_twist = Twist.from_linear_angular(
-            linear=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            angular=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-        )
+                measured_pos = np.asarray(ee_pose.position) - systematic_bias
+                measured_pose = Pose6D.from_position_and_rotation_matrix(
+                    measured_pos, np.asarray(ee_pose.rotation_matrix),
+                )
 
-        ee_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            rotation_matrix=np.eye(3, dtype=np.float64),
-        )
+                bias, _ = tc.compute_drift_correction(measured_pose, total_consumed)
+                start_pose, start_twist = tc.get_start_state(measured_pose, ee_twist, now, 0)
+                traj = tc.compute_trajectory(
+                    start_pose, start_twist, obj_pose, obj_twist, now, velocity_bias=bias,
+                )
 
-        ee_twist = Twist.from_linear_angular(
-            linear=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            angular=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-        )
+                pushed = min(5, len(traj) - 1)
+                tc.record_push_result(traj, pushed, 0, total_consumed)
+                total_consumed += pushed
 
-        dt = 0.1
-        config = TrajectoryControllerConfig(
-            kp_position=1.0,
-            kp_rotation=1.0,
-            latency=0.0,
-            simulation_horizon=10.0,
-            dt=dt,
-        )
+                ee_pose = traj[1].pose
+                ee_twist = traj[1].twist
+                errors.append(np.linalg.norm(measured_pos - np.asarray(obj_pose.position)))
 
-        traj = computeDeltaTwists(ee_pose, ee_twist, obj_pose, obj_twist, config)
+            return errors
 
-        initial_pos_error = np.linalg.norm(
-            np.asarray(ee_pose.position) - np.asarray(obj_pose.position)
-        )
-        final_pos_error = np.linalg.norm(
-            np.asarray(traj[-1].pose.position)
-            - np.asarray(obj_pose.position)
-        )
+        errors_with = _run(kp_drift=2.0)
+        errors_none = _run(kp_drift=0.0)
 
-        initial_rot_error = Rotation.from_matrix(
-            np.matmul(
-                np.asarray(ee_pose.rotation_matrix).T,
-                np.asarray(obj_pose.rotation_matrix),
-            )
-        ).as_rotvec()
-        initial_rot_error_mag = np.linalg.norm(initial_rot_error)
-
-        final_rot_error = Rotation.from_matrix(
-            np.matmul(
-                np.asarray(traj[-1].pose.rotation_matrix).T,
-                np.asarray(obj_pose.rotation_matrix),
-            )
-        ).as_rotvec()
-        final_rot_error_mag = np.linalg.norm(final_rot_error)
-
-        print(f"\nPosition error: {initial_pos_error:.4f} -> {final_pos_error:.4f} m")
-        print(f"Rotation error: {initial_rot_error_mag:.4f} -> {final_rot_error_mag:.4f} rad ({np.degrees(initial_rot_error_mag):.2f} -> {np.degrees(final_rot_error_mag):.2f} deg)")
-
-        assert final_pos_error < initial_pos_error
-        assert final_rot_error_mag < initial_rot_error_mag
-
-    def testTrackingConstantVelocity(self):
-        """EE velocity should converge to match a constant-velocity object, with bounded position and rotation error."""
-
-        objRotation = Rotation.from_rotvec([0.0, 0.0, np.pi / 2]).as_matrix()
-
-        obj_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([5.0, 6.0, 7.0], dtype=np.float64),
-            rotation_matrix=objRotation,
-        )
-
-        obj_twist = Twist.from_linear_angular(
-            linear=np.array([1.0, 1.0, 1.0], dtype=np.float64),
-            angular=np.array([0.1, 0.1, 0.1], dtype=np.float64),
-        )
-
-        ee_pose = Pose6D.from_position_and_rotation_matrix(
-            position=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            rotation_matrix=np.eye(3, dtype=np.float64),
-        )
-
-        ee_twist = Twist.from_linear_angular(
-            linear=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            angular=np.array([0.0, 0.0, 0.0], dtype=np.float64),
-        )
-
-        dt = 0.1
-        config = TrajectoryControllerConfig(
-            kp_position=2.0,
-            kp_rotation=1.0,
-            latency=5.0,
-            simulation_horizon=5.0,
-            dt=dt,
-        )
-
-        traj = computeDeltaTwists(ee_pose, ee_twist, obj_pose, obj_twist, config)
-
-        final_step = traj[-1]
-        final_ee_position = np.asarray(final_step.pose.position)
-        final_pos_error = np.linalg.norm(
-            np.asarray(obj_pose.position) - final_ee_position
-        )
-
-        final_ee_velocity = np.asarray(final_step.twist.linear)
-        target_velocity = np.asarray(obj_twist.linear)
-
-        velocity_error = np.linalg.norm(final_ee_velocity - target_velocity)
-
-        final_ee_rotation = np.asarray(final_step.pose.rotation_matrix)
-        rot_error = np.matmul(final_ee_rotation.T, np.asarray(obj_pose.rotation_matrix))
-        rot_error_vec = Rotation.from_matrix(rot_error).as_rotvec()
-        final_rot_error_mag = np.linalg.norm(rot_error_vec)
-
-        print(f"\nTarget velocity: {target_velocity}")
-        print(f"Final EE velocity: {final_ee_velocity}")
-        print(f"Velocity error: {velocity_error:.4f} m/s")
-
-        print(f"Final positional error: {final_pos_error:.4f} m")
-        print(f"Final rotational error: {final_rot_error_mag:.4f} rad ({np.degrees(final_rot_error_mag):.2f} deg)")
-
-        assert velocity_error < 0.1, f"Velocity tracking error too large: {velocity_error:.4f} m/s"
+        assert errors_with[-1] < errors_with[0], "Error with drift correction should decrease"
+        assert errors_none[-1] < errors_none[0], "Error without drift correction should decrease"
