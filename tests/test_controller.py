@@ -46,7 +46,7 @@ class TestTrajectoryController:
 
             ee_pose = traj[1].pose
             ee_twist = traj[1].twist
-            errors.append(np.linalg.norm(np.array([ee_pose.x, ee_pose.y, ee_pose.z]) - np.array([obj_pose.x, obj_pose.y, obj_pose.z])))
+            errors.append(np.linalg.norm(np.asarray(ee_pose.position) - np.asarray(obj_pose.position)))
 
         for i in range(len(errors) - 1):
             assert errors[i + 1] <= errors[i] + EPS, f"Error must not increase: step {i} ({errors[i]:.6f}) -> step {i+1} ({errors[i+1]:.6f})"
@@ -74,7 +74,7 @@ class TestTrajectoryController:
             ee_pose = traj[1].pose
             ee_twist = traj[1].twist
             obj_pos_next = obj_velocity * (now + tc.config.dt)
-            position_errors.append(np.linalg.norm(np.array([ee_pose.x, ee_pose.y, ee_pose.z]) - obj_pos_next))
+            position_errors.append(np.linalg.norm(np.asarray(ee_pose.position) - obj_pos_next))
 
         peak_idx = int(np.argmax(position_errors))
         for i in range(peak_idx, len(position_errors) - 1):
@@ -126,7 +126,12 @@ class TestTrajectoryController:
             for step in range(n_steps):
                 now = step * tc.config.dt
 
-                measured_pos = np.array([ee_pose.x, ee_pose.y, ee_pose.z]) - systematic_bias
+                pos_via_property = np.asarray(ee_pose.position)
+                pos_via_xyz = np.array([ee_pose.x, ee_pose.y, ee_pose.z])
+                if not np.allclose(pos_via_property, pos_via_xyz):
+                    print(f"!!DESYNC step={step} .position={pos_via_property} .xyz={pos_via_xyz}")
+
+                measured_pos = np.asarray(ee_pose.position) - systematic_bias
                 measured_pose = Pose6D.from_position_and_rotation_matrix(
                     measured_pos, np.asarray(ee_pose.rotation_matrix),
                 )
@@ -147,7 +152,7 @@ class TestTrajectoryController:
 
                 ee_pose = traj[1].pose
                 ee_twist = traj[1].twist
-                errors.append(np.linalg.norm(measured_pos - np.array([obj_pose.x, obj_pose.y, obj_pose.z])))
+                errors.append(np.linalg.norm(measured_pos - np.asarray(obj_pose.position)))
 
                 print(f"[{label}] step={step:2d} err={errors[-1]:.4f} "
                       f"ee_x={ee_pose.x:.4f} meas_x={measured_pos[0]:.4f} "
@@ -185,7 +190,7 @@ class TestTrajectoryController:
 
         offset = np.array([0.1, 0.0, 0.0])
         measured_pose = Pose6D.from_position_and_rotation_matrix(
-            np.array([traj[1].pose.x, traj[1].pose.y, traj[1].pose.z]) + offset, np.eye(3),
+            np.asarray(traj[1].pose.position) + offset, np.eye(3),
         )
         blended_pose, _ = tc.get_start_state(measured_pose, _zero_twist(), tc.config.dt, 0)
 
@@ -203,19 +208,19 @@ class TestTrajectoryController:
 
         # No plan yet — should return measured
         pose, _ = tc.get_start_state(measured_pose, measured_twist, 0.0, 0)
-        assert np.allclose([pose.x, pose.y, pose.z], [measured_pose.x, measured_pose.y, measured_pose.z])
+        assert np.allclose(np.asarray(pose.position), np.asarray(measured_pose.position))
 
         # After planning + push — should return last-pushed
         traj = tc.compute_trajectory(_zero_pose(), _zero_twist(), obj_pose, _zero_twist(), 0.0)
         tc.record_push_result(traj, 1, 0, 0)
         pose, _ = tc.get_start_state(measured_pose, measured_twist, tc.config.dt, 0)
-        assert np.allclose([pose.x, pose.y, pose.z], [traj[1].pose.x, traj[1].pose.y, traj[1].pose.z])
+        assert np.allclose(np.asarray(pose.position), np.asarray(traj[1].pose.position))
 
         # After clear — should blend (not equal to measured)
         tc.clear_last_pushed()
         pose, _ = tc.get_start_state(measured_pose, measured_twist, tc.config.dt, 0)
-        assert not np.allclose([pose.x, pose.y, pose.z], [measured_pose.x, measured_pose.y, measured_pose.z])
+        assert not np.allclose(np.asarray(pose.position), np.asarray(measured_pose.position))
 
         # With disable_blend — should return measured
         pose, _ = tc.get_start_state(measured_pose, measured_twist, tc.config.dt, 0, disable_blend=True)
-        assert np.allclose([pose.x, pose.y, pose.z], [measured_pose.x, measured_pose.y, measured_pose.z])
+        assert np.allclose(np.asarray(pose.position), np.asarray(measured_pose.position))

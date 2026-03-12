@@ -4,6 +4,7 @@ from manifold.types.common.pose import Pose6D
 from manifold.types.common.twist import Twist
 from manifold.types.act.controller_config import TrajectoryControllerConfig
 from manifold.types.act.control import HandControl
+from manifold.types.common.list import List
 from manifold.utils.geometry import (
     rotvec_from_matrix,
     integrate_position,
@@ -38,7 +39,7 @@ def computeSingleDeltaTwist(
     Returns:
         Delta twist to apply to the end effector.
     """
-    linear_error = np.array([objPose.x, objPose.y, objPose.z]) - np.array([eePose.x, eePose.y, eePose.z])
+    linear_error = np.asarray(objPose.position) - np.asarray(eePose.position)
     desired_lin_vel = objTwist.linear + linear_error * params.kp_position
     if velocity_bias is not None:
         desired_lin_vel = desired_lin_vel + velocity_bias.linear
@@ -63,7 +64,7 @@ def computeDeltaTwists(
     max_linear_velocity: float = float("inf"),
     velocity_bias: Twist | None = None,
     max_steps: int | None = None,
-) -> list[HandControl]:
+) -> List[HandControl]:
     """Plan a multi-step trajectory using proportional + feedforward control.
 
     At each step: compute delta twist, update EE velocity (clamped to
@@ -96,11 +97,11 @@ def computeDeltaTwists(
     obj_pose = objPose
     obj_twist = objTwist
 
-    steps: list[HandControl] = [HandControl(
+    steps: List[HandControl] = List[HandControl]([HandControl(
         pose=ee_pose,
         twist=ee_twist,
         duration=0.0,
-    )]
+    )])
 
     for step in range(1, nSteps):
         delta = computeSingleDeltaTwist(
@@ -115,14 +116,14 @@ def computeDeltaTwists(
             ee_lin = ee_lin * (max_linear_velocity / speed)
 
         ee_pos = integrate_position(
-            np.array([ee_pose.x, ee_pose.y, ee_pose.z], dtype=np.float64), ee_lin, dt,
+            np.asarray(ee_pose.position, dtype=np.float64), ee_lin, dt,
         )
         ee_rot = integrate_rotation(
             np.asarray(ee_pose.rotation_matrix, dtype=np.float64), ee_ang, dt,
         ) if not linear_only else np.asarray(ee_pose.rotation_matrix, dtype=np.float64)
 
         obj_pos = integrate_position(
-            np.array([obj_pose.x, obj_pose.y, obj_pose.z], dtype=np.float64),
+            np.asarray(obj_pose.position, dtype=np.float64),
             np.asarray(obj_twist.linear, dtype=np.float64), dt,
         )
         obj_rot = integrate_rotation(

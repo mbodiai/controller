@@ -59,7 +59,7 @@ class TrajectoryController:
 
         pred_pos, pred_lv, pred_rpy, pred_av = interpolate_plan(self._last_plan, elapsed)
 
-        measured_pos = np.array([measured_pose.x, measured_pose.y, measured_pose.z], dtype=np.float64)
+        measured_pos = np.asarray(measured_pose.position, dtype=np.float64)
         measured_rpy = np.array([measured_pose.roll, measured_pose.pitch, measured_pose.yaw], dtype=np.float64)
         measured_lv = np.asarray(measured_twist.linear, dtype=np.float64)
         measured_av = np.asarray(measured_twist.angular, dtype=np.float64)
@@ -67,7 +67,7 @@ class TrajectoryController:
         tail = self._last_plan[
             min(self._last_pushed_index, len(self._last_plan) - 1)
         ]
-        tail_pos = np.array([tail.pose.x, tail.pose.y, tail.pose.z], dtype=np.float64)
+        tail_pos = np.asarray(tail.pose.position, dtype=np.float64)
         tail_lv = np.asarray(tail.twist.linear, dtype=np.float64)
         tail_rpy = np.array([tail.pose.roll, tail.pose.pitch, tail.pose.yaw], dtype=np.float64)
         tail_av = np.asarray(tail.twist.angular, dtype=np.float64)
@@ -129,7 +129,7 @@ class TrajectoryController:
             self._last_pushed_twist = last_step.twist
         for i in range(pushed_count):
             step = trajectory[i + 1]
-            pos = np.array([step.pose.x, step.pose.y, step.pose.z])
+            pos = np.asarray(step.pose.position)
             self._consumed_positions.append((total_consumed + depth_before + i + 1, pos))
 
     def clear_last_pushed(self) -> None:
@@ -158,7 +158,7 @@ class TrajectoryController:
         expected = self._lookup_consumed_position(total_consumed)
         if expected is None:
             return None, zero
-        measured = np.array([measured_pose.x, measured_pose.y, measured_pose.z])
+        measured = np.asarray(measured_pose.position)
         error = expected - measured
         bias = self.config.kp_drift * error
         return (
