@@ -46,6 +46,10 @@ class TestTrajectoryController:
 
             ee_pose = traj[1].pose
             ee_twist = traj[1].twist
+            pos_via_property = np.asarray(ee_pose.position)
+            pos_via_xyz = np.array([ee_pose.x, ee_pose.y, ee_pose.z])
+            if not np.allclose(pos_via_property, pos_via_xyz):
+                print(f"!!DESYNC [stationary] step={step} .position={pos_via_property} .xyz={pos_via_xyz}")
             errors.append(np.linalg.norm(np.asarray(ee_pose.position) - np.asarray(obj_pose.position)))
 
         for i in range(len(errors) - 1):
@@ -73,6 +77,10 @@ class TestTrajectoryController:
 
             ee_pose = traj[1].pose
             ee_twist = traj[1].twist
+            pos_via_property = np.asarray(ee_pose.position)
+            pos_via_xyz = np.array([ee_pose.x, ee_pose.y, ee_pose.z])
+            if not np.allclose(pos_via_property, pos_via_xyz):
+                print(f"!!DESYNC [velocity] step={step} .position={pos_via_property} .xyz={pos_via_xyz}")
             obj_pos_next = obj_velocity * (now + tc.config.dt)
             position_errors.append(np.linalg.norm(np.asarray(ee_pose.position) - obj_pos_next))
 
@@ -102,6 +110,10 @@ class TestTrajectoryController:
 
             ee_pose = traj[1].pose
             ee_twist = traj[1].twist
+            pos_via_property = np.asarray(ee_pose.position)
+            pos_via_xyz = np.array([ee_pose.x, ee_pose.y, ee_pose.z])
+            if not np.allclose(pos_via_property, pos_via_xyz):
+                print(f"!!DESYNC [rotation] step={step} .position={pos_via_property} .xyz={pos_via_xyz}")
             rel_rot = np.asarray(ee_pose.rotation_matrix).T @ target_rot
             rot_errors.append(np.linalg.norm(Rotation.from_matrix(rel_rot).as_rotvec()))
 
